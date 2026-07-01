@@ -27,13 +27,13 @@ struct AppOptionRenderProps_t
 };
 constexpr int _app_render_props_list_size = 8;
 constexpr AppOptionRenderProps_t _app_render_props_list[] = {
-    {0xB8DBD9, 0x385B59, "DISPLAY TEST", image_data_icon_display},
+    {0xB8DBD9, 0x385B59, "AUTO SHOOT", image_data_icon_display},
     {0x87C38F, 0x07430F, "BRIGHTNESS", image_data_icon_brightness},
-    {0xC9C9EE, 0x49496E, "RTC TIME", image_data_icon_rtc},
+    {0xC9C9EE, 0x49496E, "TIMELAPSE", image_data_icon_rtc},
     {0xF6A4A4, 0x762424, "WIFI SCAN", image_data_icon_wifi},
-    {0x6AB8A0, 0x163820, "ENCODER TEST", image_data_icon_encoder},
+    {0x6AB8A0, 0x163820, "TRIGGER", image_data_icon_encoder},
     // {0xC2C1A5, 0x424125, "MENU DEMO", image_data_icon_menu},
-    {0xF5C396, 0x754316, "ARKANOID", image_data_icon_game},
+    {0xF5C396, 0x754316, "MULTILBOX SYNC", image_data_icon_game},
     {0xC6D5EF, 0x46556F, "SLEEP&WAKEUP", image_data_icon_sleep},
     {0xCEDBB8, 0x4E5B38, "POWER OFF", image_data_icon_poweroff},
 };
