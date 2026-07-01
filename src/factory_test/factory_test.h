@@ -102,6 +102,13 @@ public:
     void _io_test();
     void _io_test_user();
 
+    /* Auto Shoot */
+    void _auto_shoot_test();
+    void _auto_shoot_loop();
+    int _auto_shoot_enc_last_pos = 0;
+    unsigned long _auto_shoot_long_press_timer = 0;
+    bool _auto_shoot_btn_pressed = false;
+
     /* Arkanoid */
     void _arkanoid_start();
     void _arkanoid_setup();
