@@ -1,6 +1,6 @@
 /**
  * @file auto_shoot.cpp
- * @brief Auto Shoot system implementation
+ * @brief Auto Shoot system implementation with optimized TF-Luna
  * @date 2026-07-01
  */
 
@@ -30,6 +30,13 @@ void AutoShoot::init() {
     
     // Validate config
     validateConfig();
+    
+    // Initialize state
+    state.isRunning = false;
+    state.wasInRange = false;
+    state.objectDetected = false;
+    state.lastTrigger = 0;
+    state.lastUpdate = 0;
 }
 
 // ============ CONFIG MANAGEMENT ============
@@ -90,11 +97,11 @@ void AutoShoot::update() {
     
     unsigned long now = millis();
     
-    // Update at ~10Hz
+    // Update at ~10Hz (100ms interval)
     if (now - state.lastUpdate < 100) return;
     state.lastUpdate = now;
     
-    // 1. Read sensor
+    // 1. Read and process sensor
     updateSensorData();
     
     // 2. Check and trigger
@@ -103,37 +110,45 @@ void AutoShoot::update() {
 
 // ============ SENSOR ============
 void AutoShoot::updateSensorData() {
+    // Use filtered distance (motion-aware)
     state.currentDistance = readTfLunaDistance();
+    state.currentStrength = getTfLunaStrength();
     
-    // Check if in range
-    state.objectDetected = (state.currentDistance >= config.rangeMin &&
-                           state.currentDistance <= config.rangeMax);
+    // Get motion detection
+    bool hasMotion = isTfLunaMotionDetected();
+    
+    // Check if in range AND sensor is fresh
+    bool inRange = (state.currentDistance >= config.rangeMin &&
+                   state.currentDistance <= config.rangeMax);
+    
+    // Object detected only if in range with motion
+    state.objectDetected = inRange && hasMotion;
 }
 
 // ============ TRIGGER LOGIC ============
 void AutoShoot::checkAndTrigger() {
     unsigned long now = millis();
     
-    // Edge detection: object entered zone
+    // Edge detection: object ENTERED zone (transition from out to in)
     if (state.objectDetected && !state.wasInRange) {
         
-        // Check cooldown
+        // Check cooldown before triggering
         if (now - state.lastTrigger > config.cooldownMs) {
             
-            // Trigger burst
+            // Trigger burst shots
             triggerBurst(config.burstShots);
             
             state.lastTrigger = now;
         }
     }
     
-    // Update previous state
+    // Update previous state for next cycle
     state.wasInRange = state.objectDetected;
 }
 
 // ============ CAMERA TRIGGER ============
 void AutoShoot::triggerCamera() {
-    // 30ms pulse
+    // GPIO2 HIGH pulse (30ms standard)
     digitalWrite(2, HIGH);
     delayMicroseconds(30000);  // 30ms
     digitalWrite(2, LOW);
@@ -143,7 +158,7 @@ void AutoShoot::triggerBurst(uint8_t count) {
     for (uint8_t i = 0; i < count; i++) {
         triggerCamera();
         
-        // Inter-shot delay: 100ms
+        // Inter-shot delay: 100ms between shots
         if (i < count - 1) {
             delay(100);
         }
@@ -153,14 +168,14 @@ void AutoShoot::triggerBurst(uint8_t count) {
 // ============ UI INTERACTION ============
 void AutoShoot::handleEncoderRotate(int delta) {
     if (editMode.state == EditMode::SELECTING) {
-        // Navigate between items
+        // Navigate between items (0-3)
         int newIndex = editMode.selectedIndex + (delta > 0 ? 1 : -1);
         if (newIndex >= 0 && newIndex <= 3) {
             editMode.selectedIndex = newIndex;
         }
     }
     else if (editMode.state == EditMode::EDITING) {
-        // Edit selected value
+        // Edit selected value - normalize delta
         if (delta > 0) delta = 1;
         else if (delta < 0) delta = -1;
         
@@ -185,7 +200,7 @@ void AutoShoot::handleEncoderRotate(int delta) {
 
 void AutoShoot::handleButtonPress() {
     if (editMode.state == EditMode::SELECTING) {
-        // Enter edit mode
+        // Enter edit mode for selected item
         editMode.state = EditMode::EDITING;
         editMode.enterTime = millis();
     }
@@ -197,9 +212,22 @@ void AutoShoot::handleButtonPress() {
 }
 
 void AutoShoot::handleButtonLongPress() {
-    // Exit to menu
+    // Long press: exit back to menu
     editMode.state = EditMode::IDLE;
     editMode.selectedIndex = 0;
+    state.isRunning = false;
+}
+
+// ============ CONTROL ============
+void AutoShoot::start() {
+    state.isRunning = true;
+    state.wasInRange = false;
+    state.lastTrigger = 0;
+}
+
+void AutoShoot::stop() {
+    state.isRunning = false;
+    state.wasInRange = false;
 }
 
 // ============ GETTERS ============
@@ -217,8 +245,8 @@ float AutoShoot::getSelectedValue() {
     switch (editMode.selectedIndex) {
         case 0: return config.rangeMin;
         case 1: return config.rangeMax;
-        case 2: return config.burstShots;
-        case 3: return config.cooldownMs;
+        case 2: return (float)config.burstShots;
+        case 3: return (float)config.cooldownMs;
         default: return 0.0f;
     }
 }
@@ -227,4 +255,20 @@ const char* AutoShoot::getStatusString() {
     if (!state.isRunning) return "IDLE";
     if (state.objectDetected) return "DETECTING";
     return "ACTIVE";
+}
+
+uint16_t AutoShoot::getTriggeredCount() const {
+    return state.triggerCount;
+}
+
+unsigned long AutoShoot::getTimeSinceLastTrigger() const {
+    return millis() - state.lastTrigger;
+}
+
+bool AutoShoot::isRunning() const {
+    return state.isRunning;
+}
+
+bool AutoShoot::isObjectDetected() const {
+    return state.objectDetected;
 }
