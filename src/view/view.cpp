@@ -13,7 +13,7 @@
 #include <Arduino.h>
 #include <smooth_ui_toolkit.h>
 
-static FactoryTest* _ft = nullptr;
+FactoryTest* _ft = nullptr;
 
 using namespace SmoothUIToolKit;
 using namespace SmoothUIToolKit::SelectMenu;
@@ -210,21 +210,19 @@ class LauncherMenu : public SmoothOptions
     {
         int matching_index = getSelectedOptionIndex();
         if (matching_index == 0)
-            _ft->_disp_test();
+            _ft->_auto_shoot_test();
         else if (matching_index == 1)
             _ft->_disp_set_brightness();
         else if (matching_index == 2)
-            _ft->_rtc_test();
+            _ft->_timelapse_test();
         else if (matching_index == 3)
             _ft->_wifi_test();
         else if (matching_index == 4)
-            _ft->_encoder_test_user();
-        // else if (matching_index == 5)
-        //     printf("todo\n");
+            _ft->_trigger_mode_test();
         else if (matching_index == 5)
             _ft->_arkanoid_start();
         else if (matching_index == 6)
-            _ft->_rtc_wakeup_test_user();
+            _ft->_sleep_week_test();  // Sleep & Week
         else if (matching_index == 7)
             _ft->_power_off();
     }

@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timelapse UI Preview</title>
+    <style>
+        body {
+            background: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Courier New', monospace;
+        }
+        .screen {
+            width: 480px;
+            height: 270px;
+            background: #000;
+            border: 4px solid #333;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+        .header {
+            position: absolute;
+            top: 4px;
+            left: 0;
+            right: 0;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .back-btn {
+            position: absolute;
+            left: 10px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .title {
+            color: #001f;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .settings-panel {
+            position: absolute;
+            top: 36px;
+            left: 16px;
+            right: 16px;
+            height: 150px;
+            border: 2px solid #4208;
+            border-radius: 10px;
+        }
+        .setting-item {
+            height: 56px;
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            margin: 4px 8px;
+            border-radius: 6px;
+        }
+        .setting-item.selected {
+            background: #27e0;
+        }
+        .setting-item.editing {
+            background: #07e0;
+        }
+        .label {
+            color: #fff;
+            font-size: 14px;
+            margin-right: auto;
+        }
+        .setting-item.selected .label,
+        .setting-item.editing .label {
+            color: #000;
+        }
+        .value {
+            color: #fff;
+            font-size: 14px;
+            margin-right: 24px;
+        }
+        .setting-item.selected .value,
+        .setting-item.editing .value {
+            color: #000;
+        }
+        .arrow {
+            position: absolute;
+            right: 10px;
+            color: #07e0;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .status-panel {
+            position: absolute;
+            top: 192px;
+            left: 16px;
+            right: 16px;
+            height: 64px;
+            border: 2px solid #4208;
+            border-radius: 10px;
+            padding: 12px;
+        }
+        .status-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .status-label {
+            color: #fff;
+            font-size: 12px;
+            margin-right: 8px;
+        }
+        .status-value {
+            color: #07e0;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .status-text {
+            color: #fff;
+            font-size: 12px;
+            margin-left: auto;
+        }
+        .status-text.running {
+            color: #ffe0;
+        }
+        .status-text.idle {
+            color: #fff;
+        }
+        .status-text.complete {
+            color: #f800;
+        }
+        .status-bottom {
+            text-align: center;
+            color: #fff;
+            font-size: 10px;
+        }
+        .control-buttons {
+            position: absolute;
+            bottom: 8px;
+            left: 24px;
+            right: 24px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .btn {
+            width: 200px;
+            height: 24px;
+            border-radius: 6px;
+            border: 2px solid #4208;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #07e0;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .btn.start.active {
+            background: #07e0;
+            color: #000;
+        }
+        .btn.stop.active {
+            background: #f800;
+            color: #fff;
+            border-color: #f800;
+        }
+        .blink {
+            animation: blink 0.5s infinite;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="screen">
+        <!-- Header -->
+        <div class="header">
+            <span class="back-btn">&lt;</span>
+            <span class="title">TIMELAPSE</span>
+        </div>
+
+        <!-- Settings Panel -->
+        <div class="settings-panel">
+            <div class="setting-item selected">
+                <span class="label">Interval</span>
+                <span class="value">5s</span>
+                <span class="arrow">&gt;</span>
+            </div>
+            <div class="setting-item">
+                <span class="label">Total Shots</span>
+                <span class="value">INF</span>
+            </div>
+            <div class="setting-item">
+                <span class="label">Enable</span>
+                <span class="value">ON</span>
+            </div>
+        </div>
+
+        <!-- Status Panel -->
+        <div class="status-panel">
+            <div class="status-row">
+                <span class="status-label">Shots:</span>
+                <span class="status-value">0</span>
+                <span class="status-text running">Status: RUNNING</span>
+            </div>
+            <div class="status-bottom">Infinite mode</div>
+        </div>
+
+        <!-- Control Buttons -->
+        <div class="control-buttons">
+            <div class="btn start active">START</div>
+            <div class="btn stop active">STOP</div>
+        </div>
+    </div>
+
+    <script>
+        // Simple demo - click to toggle states
+        const screen = document.querySelector('.screen');
+        let state = {
+            selectedIndex: 0,
+            isEditing: false,
+            isRunning: true,
+            interval: 5000,
+            totalShots: 0,
+            shotCount: 0,
+            enabled: true
+        };
+
+        function render() {
+            const items = document.querySelectorAll('.setting-item');
+            items.forEach((item, index) => {
+                item.classList.remove('selected', 'editing');
+                if (index === state.selectedIndex) {
+                    item.classList.add('selected');
+                    if (state.isEditing && index !== 2) {
+                        item.classList.add('editing');
+                    }
+                }
+            });
+
+            const startBtn = document.querySelector('.btn.start');
+            const stopBtn = document.querySelector('.btn.stop');
+            startBtn.classList.toggle('active', state.isRunning);
+            stopBtn.classList.toggle('active', state.isRunning);
+
+            const statusText = document.querySelector('.status-text');
+            statusText.textContent = state.isRunning ? 'Status: RUNNING' : 'Status: IDLE';
+            statusText.className = 'status-text ' + (state.isRunning ? 'running' : 'idle');
+        }
+
+        screen.addEventListener('click', (e) => {
+            if (e.target.classList.contains('setting-item')) {
+                const index = Array.from(document.querySelectorAll('.setting-item')).indexOf(e.target);
+                state.selectedIndex = index;
+                state.isEditing = !state.isEditing;
+            } else if (e.target.classList.contains('btn')) {
+                state.isRunning = !state.isRunning;
+            }
+            render();
+        });
+    </script>
+</body>
+</html>

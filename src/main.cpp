@@ -9,6 +9,7 @@
  *
  */
 #include "factory_test/factory_test.h"
+#include "common/hardware_config.h"
 
 static FactoryTest ft;
 

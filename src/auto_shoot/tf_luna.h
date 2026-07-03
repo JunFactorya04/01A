@@ -5,9 +5,7 @@
  */
 
 #pragma once
-#include <HardwareSerial.h>
-
-extern HardwareSerial TFSerial;
+#include "../common/hardware_config.h"
 
 // ============ TF-LUNA CONFIG ============
 #define TFLUNA_MIN_STRENGTH 100      // Minimum signal strength (0-65535)
@@ -31,7 +29,7 @@ static TFLunaState tfLunaState;
 
 // ============ INITIALIZATION ============
 void initTfLuna() {
-    TFSerial.begin(115200, SERIAL_8N1, 13, -1);
+    TFSerial.begin(115200, SERIAL_8N1, TFLUNA_RX_PIN, -1);
     delay(100);
     tfLunaState.lastUpdateTime = millis();
 }

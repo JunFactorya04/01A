@@ -6,7 +6,7 @@
 
 #include "factory_test.h"
 #include "../auto_shoot/auto_shoot.h"
-#include "../auto_shoot/auto_shoot_ui.cpp"
+#include "../auto_shoot/auto_shoot_ui.h"
 
 extern FactoryTest* _ft;
 

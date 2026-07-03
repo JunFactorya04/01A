@@ -6,6 +6,8 @@
 
 #include "auto_shoot.h"
 #include "tf_luna.h"
+#include "../common/hardware_config.h"
+#include "../trigger_mode/trigger_mode.h"
 #include <Preferences.h>
 
 // Global instance
@@ -22,8 +24,8 @@ void AutoShoot::init() {
     initTfLuna();
     
     // Initialize GPIO2 for camera trigger
-    pinMode(2, OUTPUT);
-    digitalWrite(2, LOW);
+    pinMode(CAMERA_TRIGGER_PIN, OUTPUT);
+    digitalWrite(CAMERA_TRIGGER_PIN, LOW);
     
     // Load saved configuration
     loadConfig();
@@ -148,10 +150,9 @@ void AutoShoot::checkAndTrigger() {
 
 // ============ CAMERA TRIGGER ============
 void AutoShoot::triggerCamera() {
-    // GPIO2 HIGH pulse (30ms standard)
-    digitalWrite(2, HIGH);
-    delayMicroseconds(30000);  // 30ms
-    digitalWrite(2, LOW);
+    // Use Trigger Mode to handle Trigger and WiFi/BT outputs
+    // Trigger both if enabled
+    triggerMode.triggerBoth();
 }
 
 void AutoShoot::triggerBurst(uint8_t count) {

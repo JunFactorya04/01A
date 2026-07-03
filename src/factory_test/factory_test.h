@@ -105,9 +105,46 @@ public:
     /* Auto Shoot */
     void _auto_shoot_test();
     void _auto_shoot_loop();
+    void handleAutoShootInput();
+    void handleAutoShootButtonShortPress();
+    void handleAutoShootButtonLongPress();
+    void _auto_shoot_start_triggered();
+    void _auto_shoot_stop_triggered();
     int _auto_shoot_enc_last_pos = 0;
     unsigned long _auto_shoot_long_press_timer = 0;
     bool _auto_shoot_btn_pressed = false;
+
+    /* Timelapse */
+    void _timelapse_test();
+    void _timelapse_loop();
+    void handleTimelapseInput();
+    void handleTimelapseButtonShortPress();
+    void handleTimelapseButtonLongPress();
+    void _timelapse_start_triggered();
+    void _timelapse_stop_triggered();
+    int _timelapse_enc_last_pos = 0;
+    unsigned long _timelapse_long_press_timer = 0;
+    bool _timelapse_btn_pressed = false;
+
+    /* Trigger Mode */
+    void _trigger_mode_test();
+    void _trigger_mode_loop();
+    void handleTriggerModeInput();
+    void handleTriggerModeButtonShortPress();
+    void handleTriggerModeButtonLongPress();
+    int _trigger_mode_enc_last_pos = 0;
+    unsigned long _trigger_mode_long_press_timer = 0;
+    bool _trigger_mode_btn_pressed = false;
+
+    /* Sleep Week Scheduler */
+    void _sleep_week_test();
+    void _sleep_week_loop();
+    void handleSleepWeekInput();
+    void handleSleepWeekButtonShortPress();
+    void handleSleepWeekButtonLongPress();
+    int _sleep_week_enc_last_pos = 0;
+    unsigned long _sleep_week_long_press_timer = 0;
+    bool _sleep_week_btn_pressed = false;
 
     /* Arkanoid */
     void _arkanoid_start();
