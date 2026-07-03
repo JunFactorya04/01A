@@ -27,7 +27,7 @@ struct TriggerEditMode {
         SELECTING = 1
     } state = IDLE;
     
-    uint8_t selectedIndex = 0;  // 0: Trigger, 1: WiFi/BT
+    uint8_t selectedIndex = 0;  // 0: Trigger (G2), 1: Remote (G1)
 };
 
 // ============ TRIGGER MODE CLASS ============
