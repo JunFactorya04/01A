@@ -94,8 +94,8 @@ void TriggerMode::disableAll() {
 }
 
 void TriggerMode::testTrigger() {
-    triggerOut();
-    triggerRemote();
+    // Fire both simultaneously (same as AUTO SHOOT / TIMELAPSE behavior)
+    triggerBoth();
 }
 
 // ============ TRIGGER FUNCTIONS ============
