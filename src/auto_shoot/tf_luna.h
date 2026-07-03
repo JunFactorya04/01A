@@ -36,7 +36,12 @@ void initTfLuna() {
 
 // ============ RAW READ ============
 bool readTfLunaRaw(float &distance_m, uint16_t &strength) {
-    
+
+    // Drain stale frames — keep only the latest one in buffer
+    while (TFSerial.available() > 9) {
+        TFSerial.read();
+    }
+
     if (TFSerial.available() >= 9) {
         
         uint8_t buf[9];
@@ -80,10 +85,13 @@ bool validateDistance(float distance_m, uint16_t strength) {
         return false;  // Out of valid range
     }
     
-    // 3. Outlier detection (unrealistic jump)
-    float delta = abs(distance_m - tfLunaState.distance_m);
-    if (delta > TFLUNA_OUTLIER_THRESHOLD) {
-        return false;  // Possible outlier/spike
+    // 3. Outlier detection — skip if not yet initialized (distance_m == 0)
+    //    At startup distance_m=0, so any real reading would be rejected forever.
+    if (tfLunaState.distance_m > 0.0f) {
+        float delta = abs(distance_m - tfLunaState.distance_m);
+        if (delta > TFLUNA_OUTLIER_THRESHOLD) {
+            return false;  // Possible outlier/spike
+        }
     }
     
     return true;
