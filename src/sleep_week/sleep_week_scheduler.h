@@ -73,15 +73,11 @@ public:
     
     SleepWeekScheduler();
     ~SleepWeekScheduler() = default;
-    
-    // ===== Initialization =====
-    void init();
-    void loadConfig();
-    void saveConfig();
-    
-    // ===== Main Loop =====
-    void update();
-    
+
+    // ===== RTC alarm callback (set by factory_test before use) =====
+    static void setAlarmCallback(void (*cb)(uint8_t hour, uint8_t minute)) {
+        s_alarmCb = cb;
+    }
     // ===== Control =====
     void toggleDay(uint8_t day);
     void setSleepTime(uint8_t hour, uint8_t minute);
@@ -111,6 +107,7 @@ private:
     void validateConfig();
     uint8_t getCurrentDayOfWeek();
     void setRTCAlarm(uint8_t hour, uint8_t minute);
+    static void (*s_alarmCb)(uint8_t, uint8_t);
 };
 
 // Global instance

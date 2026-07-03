@@ -31,6 +31,9 @@ static bool getLocalTimeSafe(struct tm& out)
 // Global instance
 SleepWeekScheduler sleepWeekScheduler;
 
+// Static callback for RTC alarm
+void (*SleepWeekScheduler::s_alarmCb)(uint8_t, uint8_t) = nullptr;
+
 // ============ CONSTRUCTOR ============
 SleepWeekScheduler::SleepWeekScheduler() {
     // Default config set in header
@@ -252,13 +255,15 @@ void SleepWeekScheduler::enterSleepMode() {
 void SleepWeekScheduler::wakeUp() {
     state.isSleeping = false;
     
-    // Start selected mode
+    // Start selected mode — must init before start to ensure GPIO/sensor ready
     switch (config.mode) {
         case MODE_AUTO_SHOOT:
+            autoShoot.init();
             autoShoot.start();
             timelapse.stop();
             break;
         case MODE_TIMELAPSE:
+            timelapse.init();
             timelapse.start();
             autoShoot.stop();
             break;
@@ -400,7 +405,7 @@ uint8_t SleepWeekScheduler::getCurrentDayOfWeek() {
 }
 
 void SleepWeekScheduler::setRTCAlarm(uint8_t hour, uint8_t minute) {
-    // Set RTC alarm for wake time
-    // In real implementation, use RTC library
-    // For now, placeholder
+    if (s_alarmCb) {
+        s_alarmCb(hour, minute);
+    }
 }
