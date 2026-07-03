@@ -31,9 +31,9 @@ void renderTestButton();
 #define COLOR_HIGHLIGHT 0x27E0 // Bright green
 
 // Layout
-#define ITEM_HEIGHT 40
-#define ITEM_Y_START 30
-#define ITEM_INDENT 20
+#define ITEM_HEIGHT 30
+#define ITEM_Y_START 22
+#define ITEM_INDENT 15
 
 // ============ RENDER FUNCTIONS ============
 void renderTriggerModeUI() {
@@ -60,7 +60,7 @@ void renderTriggerModeUI() {
 
 // ============ HEADER ============
 void renderTriggerHeader() {
-    _ft->_canvas->setFont(&fonts::efontCN_24);
+    _ft->_canvas->setFont(&fonts::efontCN_16);
     _ft->_canvas->setTextDatum(top_center);
     _ft->_canvas->setTextColor(COLOR_BLUE);
     _ft->_canvas->drawString("TRIGGER MODE", SCREEN_WIDTH / 2, 2);
@@ -73,14 +73,14 @@ void renderTriggerHeader() {
 
 // ============ G1/G2 LABELS ============
 void renderG1G2Labels() {
-    _ft->_canvas->setFont(&fonts::efontCN_16);
+    _ft->_canvas->setFont(&fonts::efontCN_12);
     _ft->_canvas->setTextDatum(top_left);
     
     // Trigger Label
     renderToggleLabel(0, "Trigger", triggerMode.getTriggerEnabled(), ITEM_Y_START);
     
     // WiFi/BT Label
-    renderToggleLabel(1, "WiFi/BT", triggerMode.getWifiBtEnabled(), ITEM_Y_START + ITEM_HEIGHT + 10);
+    renderToggleLabel(1, "WiFi/BT", triggerMode.getWifiBtEnabled(), ITEM_Y_START + ITEM_HEIGHT + 8);
 }
 
 void renderToggleLabel(uint8_t index, const char* label, bool enabled, int y) {
@@ -88,7 +88,7 @@ void renderToggleLabel(uint8_t index, const char* label, bool enabled, int y) {
     
     // Background highlight
     if (isSelected) {
-        _ft->_canvas->fillRoundRect(10, y - 4, 220, 36, 5, COLOR_HIGHLIGHT);
+        _ft->_canvas->fillRoundRect(10, y - 3, 220, 26, 5, COLOR_HIGHLIGHT);
     }
     
     // Text color
@@ -96,57 +96,57 @@ void renderToggleLabel(uint8_t index, const char* label, bool enabled, int y) {
     _ft->_canvas->setTextColor(textColor);
     
     // Label
-    _ft->_canvas->drawString(label, ITEM_INDENT, y + 8);
+    _ft->_canvas->drawString(label, ITEM_INDENT, y + 6);
     
     // ON/OFF indicator
     _ft->_canvas->setTextDatum(top_right);
     _ft->_canvas->setTextColor(enabled ? COLOR_GREEN : COLOR_RED);
-    _ft->_canvas->drawString(enabled ? "ON" : "OFF", 220, y + 8);
+    _ft->_canvas->drawString(enabled ? "ON" : "OFF", 220, y + 6);
     
     // Arrow indicator
     _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_BLUE);
-    _ft->_canvas->drawString(">", 235, y + 8);
+    _ft->_canvas->drawString(">", 235, y + 6);
     
     _ft->_canvas->setTextDatum(top_left);
 }
 
 // ============ STATUS PANEL ============
 void renderTriggerStatusPanel() {
-    int y = 95;
+    int y = 88;
     
     // Panel border
     _ft->_canvas->drawRoundRect(8, y, 224, 20, 5, COLOR_BORDER);
     
-    _ft->_canvas->setFont(&fonts::efontCN_12);
+    _ft->_canvas->setFont(&fonts::efontCN_10);
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(COLOR_TEXT);
     
     // Trigger count
-    _ft->_canvas->drawString("Triggers: ", 15, y + 4);
+    _ft->_canvas->drawString("Triggers:", 12, y + 5);
     _ft->_canvas->setTextColor(COLOR_GREEN);
     char countStr[16];
     snprintf(countStr, sizeof(countStr), "%d", triggerMode.getTriggerCount());
-    _ft->_canvas->drawString(countStr, 85, y + 4);
+    _ft->_canvas->drawString(countStr, 70, y + 5);
     
     // Status
     _ft->_canvas->setTextDatum(top_right);
     _ft->_canvas->setTextColor(triggerMode.isRunning() ? COLOR_GREEN : COLOR_TEXT);
-    _ft->_canvas->drawString(triggerMode.isRunning() ? "ACTIVE" : "IDLE", 225, y + 4);
+    _ft->_canvas->drawString(triggerMode.isRunning() ? "ACTIVE" : "IDLE", 225, y + 5);
     
     _ft->_canvas->setTextDatum(top_left);
 }
 
 // ============ TEST BUTTON ============
 void renderTestButton() {
-    int y = 118;
+    int y = 115;
     
     // Button
-    _ft->_canvas->drawRoundRect(60, y, 120, 12, 3, COLOR_BORDER);
+    _ft->_canvas->drawRoundRect(60, y, 120, 14, 3, COLOR_BORDER);
     
-    _ft->_canvas->setFont(&fonts::efontCN_12);
+    _ft->_canvas->setFont(&fonts::efontCN_10);
     _ft->_canvas->setTextDatum(top_center);
     _ft->_canvas->setTextColor(COLOR_TEXT);
-    _ft->_canvas->drawString("TEST TRIGGER", 120, y + 1);
+    _ft->_canvas->drawString("TEST TRIGGER", 120, y + 2);
 }
 
 // ============ INIT ============

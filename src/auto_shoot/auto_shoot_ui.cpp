@@ -29,9 +29,9 @@ void renderAutoShootControlButtons();
 #define COLOR_BORDER 0x4208
 #define COLOR_HIGHLIGHT 0x27E0
 
-#define ITEM_HEIGHT 28
-#define ITEM_Y_START 20
-#define ITEM_INDENT 12
+#define ITEM_HEIGHT 22
+#define ITEM_Y_START 18
+#define ITEM_INDENT 10
 
 // ============ UI STATE ============
 static unsigned long blinkTimer = 0;
@@ -75,7 +75,7 @@ void renderAutoShootUI() {
 void renderAutoShootHeader() {
     if (!_ft || !_ft->_canvas) return;
 
-    _ft->_canvas->setFont(&fonts::efontCN_24);
+    _ft->_canvas->setFont(&fonts::efontCN_16);
     _ft->_canvas->setTextDatum(top_center);
     _ft->_canvas->setTextColor(COLOR_GREEN);
     _ft->_canvas->drawString("AUTO MODE", SCREEN_WIDTH / 2, 2);
@@ -89,15 +89,15 @@ void renderAutoShootHeader() {
 void renderAutoShootSettingsPanel() {
     if (!_ft || !_ft->_canvas) return;
 
-    _ft->_canvas->drawRoundRect(8, 18, 224, 75, 5, COLOR_BORDER);
+    _ft->_canvas->drawRoundRect(8, 16, 224, 68, 5, COLOR_BORDER);
 
-    _ft->_canvas->setFont(&fonts::efontCN_16);
+    _ft->_canvas->setFont(&fonts::efontCN_12);
     _ft->_canvas->setTextDatum(top_left);
 
     renderAutoShootSettingsItem(0, "Range Min", autoShoot.config.rangeMin, " m");
     renderAutoShootSettingsItem(1, "Range Max", autoShoot.config.rangeMax, " m");
-    renderAutoShootSettingsItem(2, "Burst Shots", (float)autoShoot.config.burstShots, " shots");
-    renderAutoShootSettingsItem(3, "Cooldown", (float)autoShoot.config.cooldownMs, " ms");
+    renderAutoShootSettingsItem(2, "Burst", (float)autoShoot.config.burstShots, "");
+    renderAutoShootSettingsItem(3, "Cool", (float)autoShoot.config.cooldownMs, " ms");
 }
 
 // ============ SETTINGS ITEM ============
@@ -113,21 +113,21 @@ void renderAutoShootSettingsItem(uint8_t index, const char* label, float value, 
     bool isEditing = (autoShoot.editMode.state == EditMode::EDITING && isSelected);
 
     if (isSelected) {
-        _ft->_canvas->fillRoundRect(10, y - 2, 220, 24, 3,
+        _ft->_canvas->fillRoundRect(10, y - 1, 220, 18, 3,
             isEditing ? COLOR_HIGHLIGHT : COLOR_BORDER);
     }
 
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_TEXT);
 
-    _ft->_canvas->drawString(label, ITEM_INDENT + 8, y + 4);
+    _ft->_canvas->drawString(label, ITEM_INDENT + 6, y + 2);
 
     char valueStr[32];
 
     if (index == 2 || index == 3) {
         snprintf(valueStr, sizeof(valueStr), "%d%s", (int)value, unit);
     } else {
-        snprintf(valueStr, sizeof(valueStr), "%.2f%s", value, unit);
+        snprintf(valueStr, sizeof(valueStr), "%.1f%s", value, unit);
     }
 
     _ft->_canvas->setTextDatum(top_right);
@@ -136,10 +136,10 @@ void renderAutoShootSettingsItem(uint8_t index, const char* label, float value, 
         _ft->_canvas->setTextColor(COLOR_BG);
     }
 
-    _ft->_canvas->drawString(valueStr, 210, y + 4);
+    _ft->_canvas->drawString(valueStr, 210, y + 2);
 
     _ft->_canvas->setTextColor(COLOR_GREEN);
-    _ft->_canvas->drawString(">", 225, y + 4);
+    _ft->_canvas->drawString(">", 225, y + 2);
 
     _ft->_canvas->setTextDatum(top_left);
 }
@@ -148,68 +148,68 @@ void renderAutoShootSettingsItem(uint8_t index, const char* label, float value, 
 void renderAutoShootStatusPanel() {
     if (!_ft || !_ft->_canvas) return;
 
-    int y = 96;
+    int y = 88;
 
-    _ft->_canvas->drawRoundRect(8, y, 224, 32, 5, COLOR_BORDER);
+    _ft->_canvas->drawRoundRect(8, y, 224, 24, 5, COLOR_BORDER);
 
-    _ft->_canvas->setFont(&fonts::efontCN_16);
+    _ft->_canvas->setFont(&fonts::efontCN_12);
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(COLOR_TEXT);
 
     const char* status = autoShoot.getStatusString();
     if (!status) status = "IDLE";
 
-    _ft->_canvas->drawString("TF-Luna:", 15, y + 6);
+    _ft->_canvas->drawString("TF:", 12, y + 5);
 
     _ft->_canvas->setTextColor(COLOR_GREEN);
-    _ft->_canvas->setFont(&fonts::efontCN_24);
+    _ft->_canvas->setFont(&fonts::efontCN_16);
 
     char distStr[32];
-    snprintf(distStr, sizeof(distStr), "%.2f m", autoShoot.state.currentDistance);
+    snprintf(distStr, sizeof(distStr), "%.1fm", autoShoot.state.currentDistance);
 
-    _ft->_canvas->drawString(distStr, 85, y + 4);
+    _ft->_canvas->drawString(distStr, 35, y + 3);
 
-    _ft->_canvas->setFont(&fonts::efontCN_16);
+    _ft->_canvas->setFont(&fonts::efontCN_12);
     _ft->_canvas->setTextDatum(top_right);
     _ft->_canvas->setTextColor(COLOR_TEXT);
-    _ft->_canvas->drawString("Status:", 155, y + 6);
+    _ft->_canvas->drawString("St:", 155, y + 5);
 
     uint16_t color = COLOR_GREEN;
     if (strcmp(status, "IDLE") == 0) color = COLOR_TEXT;
     if (strcmp(status, "DETECTING") == 0) color = COLOR_YELLOW;
 
     _ft->_canvas->setTextColor(color);
-    _ft->_canvas->drawString(status, 225, y + 6);
+    _ft->_canvas->drawString(status, 225, y + 5);
 
     _ft->_canvas->setTextDatum(top_center);
-    _ft->_canvas->setFont(&fonts::efontCN_12);
+    _ft->_canvas->setFont(&fonts::efontCN_10);
 
     const char* motion = autoShoot.state.objectDetected ? "DETECTED" : "---";
     _ft->_canvas->setTextColor(autoShoot.state.objectDetected ? COLOR_GREEN : COLOR_TEXT);
 
-    _ft->_canvas->drawString(motion, 120, y + 18);
+    _ft->_canvas->drawString(motion, 120, y + 13);
 }
 
 // ============ CONTROL BUTTONS ============
 void renderAutoShootControlButtons() {
     if (!_ft || !_ft->_canvas) return;
 
-    int btnY = 120;
+    int btnY = 115;
 
-    _ft->_canvas->setFont(&fonts::efontCN_12);
+    _ft->_canvas->setFont(&fonts::efontCN_10);
 
-    _ft->_canvas->drawRoundRect(12, btnY, 100, 12, 3,
+    _ft->_canvas->drawRoundRect(12, btnY, 100, 14, 3,
         autoShoot.state.isRunning ? COLOR_GREEN : COLOR_BORDER);
 
     _ft->_canvas->setTextDatum(top_center);
     _ft->_canvas->setTextColor(autoShoot.state.isRunning ? COLOR_BG : COLOR_GREEN);
-    _ft->_canvas->drawString("START", 62, btnY + 1);
+    _ft->_canvas->drawString("START", 62, btnY + 2);
 
-    _ft->_canvas->drawRoundRect(128, btnY, 100, 12, 3,
+    _ft->_canvas->drawRoundRect(128, btnY, 100, 14, 3,
         autoShoot.state.isRunning ? COLOR_RED : COLOR_BORDER);
 
     _ft->_canvas->setTextColor(autoShoot.state.isRunning ? COLOR_RED : COLOR_TEXT);
-    _ft->_canvas->drawString("STOP", 178, btnY + 1);
+    _ft->_canvas->drawString("STOP", 178, btnY + 2);
 }
 
 // ============ INIT ============
