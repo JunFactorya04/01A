@@ -18,9 +18,9 @@ Timelapse::Timelapse() {
 
 // ============ INITIALIZATION ============
 void Timelapse::init() {
-    // Initialize GPIO2 for camera trigger (shared with Auto Shoot)
-    pinMode(CAMERA_TRIGGER_PIN, OUTPUT);
-    digitalWrite(CAMERA_TRIGGER_PIN, LOW);
+    // Initialize G2 output pin (Port B Yellow, GPIO 2) for camera trigger
+    pinMode(TRIGGER_G2_PIN, OUTPUT);
+    digitalWrite(TRIGGER_G2_PIN, LOW);
     
     // Load saved configuration
     loadConfig();
@@ -98,9 +98,15 @@ void Timelapse::update() {
 
 // ============ CAMERA TRIGGER ============
 void Timelapse::triggerCamera() {
-    // Use Trigger Mode to handle Trigger and WiFi/BT outputs
-    // Trigger both if enabled
-    triggerMode.triggerBoth();
+    // Acquire global trigger lock to prevent conflict with Auto Shoot
+    if (!acquireTriggerLock()) return;
+
+    // Directly drive G2 (Port B Yellow, GPIO 2) — HIGH 30ms pulse
+    digitalWrite(TRIGGER_G2_PIN, HIGH);
+    delay(30);
+    digitalWrite(TRIGGER_G2_PIN, LOW);
+
+    releaseTriggerLock();
 }
 
 // ============ CONTROL ============

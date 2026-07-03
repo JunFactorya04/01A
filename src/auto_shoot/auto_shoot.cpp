@@ -23,9 +23,13 @@ void AutoShoot::init() {
     // Initialize TF-Luna sensor
     initTfLuna();
     
-    // Initialize GPIO2 for camera trigger
-    pinMode(CAMERA_TRIGGER_PIN, OUTPUT);
-    digitalWrite(CAMERA_TRIGGER_PIN, LOW);
+    // Initialize G2 output pin (Port B, GPIO 5) for camera/DIN trigger
+    pinMode(TRIGGER_G2_PIN, OUTPUT);
+    digitalWrite(TRIGGER_G2_PIN, LOW);
+    
+    // Also initialize triggerMode so G1/G2 GPIO are properly configured
+    // and saved settings are loaded
+    triggerMode.init();
     
     // Load saved configuration
     loadConfig();
@@ -151,9 +155,16 @@ void AutoShoot::checkAndTrigger() {
 
 // ============ CAMERA TRIGGER ============
 void AutoShoot::triggerCamera() {
-    // Use Trigger Mode to handle Trigger and WiFi/BT outputs
-    // Trigger both if enabled
-    triggerMode.triggerBoth();
+    // Acquire global trigger lock to prevent conflict with Timelapse
+    if (!acquireTriggerLock()) return;
+
+    // Directly drive G2 (Port B, GPIO 5) — HIGH 30ms pulse
+    // Does NOT depend on TriggerMode enable flags
+    digitalWrite(TRIGGER_G2_PIN, HIGH);
+    delay(30);
+    digitalWrite(TRIGGER_G2_PIN, LOW);
+
+    releaseTriggerLock();
 }
 
 void AutoShoot::triggerBurst(uint8_t count) {
@@ -171,9 +182,9 @@ void AutoShoot::triggerBurst(uint8_t count) {
 // ============ UI INTERACTION ============
 void AutoShoot::handleEncoderRotate(int delta) {
     if (editMode.state == EditMode::SELECTING) {
-        // Navigate between items (0-3)
+        // Navigate between items (0-5: 0-3=settings, 4=START, 5=STOP)
         int newIndex = editMode.selectedIndex + (delta > 0 ? 1 : -1);
-        if (newIndex >= 0 && newIndex <= 3) {
+        if (newIndex >= 0 && newIndex <= 5) {
             editMode.selectedIndex = newIndex;
         }
     }
@@ -203,9 +214,15 @@ void AutoShoot::handleEncoderRotate(int delta) {
 
 void AutoShoot::handleButtonPress() {
     if (editMode.state == EditMode::SELECTING) {
-        // Enter edit mode for selected item
-        editMode.state = EditMode::EDITING;
-        editMode.enterTime = millis();
+        if (editMode.selectedIndex == 4) {
+            start();
+        } else if (editMode.selectedIndex == 5) {
+            stop();
+        } else {
+            // Enter edit mode for selected settings item
+            editMode.state = EditMode::EDITING;
+            editMode.enterTime = millis();
+        }
     }
     else if (editMode.state == EditMode::EDITING) {
         // Save and exit edit mode

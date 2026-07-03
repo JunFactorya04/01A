@@ -65,7 +65,7 @@ void renderSleepWeekUI() {
 
 // ============ HEADER ============
 void renderSleepWeekHeader() {
-    _ft->_canvas->setFont(&fonts::efontCN_24);
+    _ft->_canvas->setFont(&fonts::efontCN_16);
     _ft->_canvas->setTextDatum(top_center);
     _ft->_canvas->setTextColor(COLOR_BLUE);
     _ft->_canvas->drawString("SLEEP & WEEK", SCREEN_WIDTH / 2, 2);
@@ -109,64 +109,90 @@ void renderDays() {
 // ============ TIME SETTINGS ============
 void renderTimeSettings() {
     int y = 55;
-    
+
+    bool sleepSel  = (sleepWeekScheduler.editMode.selectedIndex == 7);
+    bool wakeSel   = (sleepWeekScheduler.editMode.selectedIndex == 8);
+    bool sleepEdit = (sleepSel && sleepWeekScheduler.editMode.state == SleepWeekEditMode::SELECTING_TIME);
+    bool wakeEdit  = (wakeSel  && sleepWeekScheduler.editMode.state == SleepWeekEditMode::SELECTING_TIME);
+
     _ft->_canvas->setFont(&fonts::efontCN_12);
     _ft->_canvas->setTextDatum(top_left);
-    _ft->_canvas->setTextColor(COLOR_TEXT);
-    
-    // Sleep time
+
+    // Sleep time highlight background
+    if (sleepSel) {
+        _ft->_canvas->fillRoundRect(8, y - 2, 112, 16, 3, sleepEdit ? COLOR_HIGHLIGHT : COLOR_BORDER);
+    }
+    // Wake time highlight background
+    if (wakeSel) {
+        _ft->_canvas->fillRoundRect(120, y - 2, 112, 16, 3, wakeEdit ? COLOR_HIGHLIGHT : COLOR_BORDER);
+    }
+
+    // Sleep label & value
+    _ft->_canvas->setTextColor(sleepSel ? COLOR_BG : COLOR_TEXT);
     _ft->_canvas->drawString("Sleep:", 10, y);
     char sleepStr[16];
-    snprintf(sleepStr, sizeof(sleepStr), "%02d:%02d", 
+    snprintf(sleepStr, sizeof(sleepStr), "%02d:%02d",
              sleepWeekScheduler.config.timeConfig.sleepHour,
              sleepWeekScheduler.config.timeConfig.sleepMinute);
-    _ft->_canvas->setTextColor(COLOR_GREEN);
+    _ft->_canvas->setTextColor(sleepSel ? COLOR_BG : COLOR_GREEN);
     _ft->_canvas->drawString(sleepStr, 60, y);
-    
-    // Wake time
-    _ft->_canvas->setTextColor(COLOR_TEXT);
-    _ft->_canvas->drawString("Wake:", 120, y);
+
+    // Wake label & value
+    _ft->_canvas->setTextColor(wakeSel ? COLOR_BG : COLOR_TEXT);
+    _ft->_canvas->drawString("Wake:", 122, y);
     char wakeStr[16];
     snprintf(wakeStr, sizeof(wakeStr), "%02d:%02d",
              sleepWeekScheduler.config.timeConfig.wakeHour,
              sleepWeekScheduler.config.timeConfig.wakeMinute);
-    _ft->_canvas->setTextColor(COLOR_GREEN);
-    _ft->_canvas->drawString(wakeStr, 170, y);
+    _ft->_canvas->setTextColor(wakeSel ? COLOR_BG : COLOR_GREEN);
+    _ft->_canvas->drawString(wakeStr, 172, y);
 }
 
 // ============ MODE SELECTION ============
 void renderModeSelection() {
     int y = 75;
-    
+    bool modeSel  = (sleepWeekScheduler.editMode.selectedIndex == 9);
+    bool modeEdit = (sleepWeekScheduler.editMode.state == SleepWeekEditMode::SELECTING_MODE);
+
     _ft->_canvas->setFont(&fonts::efontCN_12);
     _ft->_canvas->setTextDatum(top_left);
-    _ft->_canvas->setTextColor(COLOR_TEXT);
+
+    if (modeSel || modeEdit) {
+        _ft->_canvas->fillRoundRect(8, y - 2, 224, 16, 3, modeEdit ? COLOR_HIGHLIGHT : COLOR_BORDER);
+    }
+
+    _ft->_canvas->setTextColor((modeSel || modeEdit) ? COLOR_BG : COLOR_TEXT);
     _ft->_canvas->drawString("Mode:", 10, y);
-    
-    _ft->_canvas->setTextColor(COLOR_BLUE);
+
+    _ft->_canvas->setTextColor((modeSel || modeEdit) ? COLOR_BG : COLOR_BLUE);
     _ft->_canvas->drawString(sleepWeekScheduler.getModeString(), 60, y);
 }
 
 // ============ STATUS ============
 void renderStatus() {
     int y = 95;
-    
-    _ft->_canvas->drawRoundRect(8, y, 224, 20, 5, COLOR_BORDER);
-    
+    bool enableSel = (sleepWeekScheduler.editMode.selectedIndex == 10);
+
+    _ft->_canvas->drawRoundRect(8, y, 224, 20, 5, enableSel ? COLOR_GREEN : COLOR_BORDER);
+
+    if (enableSel) {
+        _ft->_canvas->fillRoundRect(9, y + 1, 222, 18, 4, COLOR_BORDER);
+    }
+
     _ft->_canvas->setFont(&fonts::efontCN_12);
     _ft->_canvas->setTextDatum(top_left);
-    _ft->_canvas->setTextColor(COLOR_TEXT);
-    
-    // Scheduler status
+
+    // Scheduler on/off label (highlighted when selected for toggling)
+    _ft->_canvas->setTextColor(enableSel ? COLOR_GREEN : COLOR_TEXT);
     _ft->_canvas->drawString("Scheduler: ", 15, y + 4);
     _ft->_canvas->setTextColor(sleepWeekScheduler.isSchedulerEnabled() ? COLOR_GREEN : COLOR_RED);
     _ft->_canvas->drawString(sleepWeekScheduler.isSchedulerEnabled() ? "ON" : "OFF", 95, y + 4);
-    
+
     // Sleep status
     _ft->_canvas->setTextDatum(top_right);
     _ft->_canvas->setTextColor(sleepWeekScheduler.isSleeping() ? COLOR_RED : COLOR_TEXT);
     _ft->_canvas->drawString(sleepWeekScheduler.isSleeping() ? "SLEEP" : "AWAKE", 225, y + 4);
-    
+
     _ft->_canvas->setTextDatum(top_left);
 }
 

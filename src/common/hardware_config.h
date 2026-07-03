@@ -9,10 +9,12 @@
 #include <Arduino.h>
 
 // ============ GPIO PIN DEFINITIONS ============
-#define CAMERA_TRIGGER_PIN 2
+// Port B connector (HY2.0-4P): Yellow=G2=GPIO2, White=G1=GPIO1
+#define TRIGGER_G1_PIN 1    // Port B White
+#define TRIGGER_G2_PIN 2    // Port B Yellow  (camera/DIN trigger output)
 #define BUZZ_PIN 3
-#define TRIGGER_G1_PIN 4
-#define TRIGGER_G2_PIN 5
+// GPIO 4 = ST7789V2 RS (display) — DO NOT USE for trigger
+// GPIO 5 = ST7789V2 MOSI (display) — DO NOT USE for trigger
 #define POWER_HOLD_PIN 46
 #define ENCODER_PIN_A 40
 #define ENCODER_PIN_B 41

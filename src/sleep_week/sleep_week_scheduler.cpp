@@ -272,25 +272,27 @@ void SleepWeekScheduler::wakeUp() {
 // ============ UI INTERACTION ============
 void SleepWeekScheduler::handleEncoderRotate(int delta) {
     if (editMode.state == SleepWeekEditMode::SELECTING_DAY) {
-        // Navigate between days
+        // Navigate all controls: 0-6=days, 7=sleep time, 8=wake time, 9=mode, 10=scheduler on/off
         int newIndex = editMode.selectedIndex + (delta > 0 ? 1 : -1);
-        if (newIndex >= 0 && newIndex <= 6) {
+        if (newIndex >= 0 && newIndex <= 10) {
             editMode.selectedIndex = newIndex;
         }
     } else if (editMode.state == SleepWeekEditMode::SELECTING_TIME) {
-        // Adjust time
+        // Adjust time — selectedIndex 7=sleep, 8=wake
+        bool isSleep = (editMode.selectedIndex == 7);
+        uint8_t& refHour   = isSleep ? config.timeConfig.sleepHour   : config.timeConfig.wakeHour;
+        uint8_t& refMinute = isSleep ? config.timeConfig.sleepMinute : config.timeConfig.wakeMinute;
+
         if (editMode.timeField == 0) {
-            // Hour
-            int newHour = config.timeConfig.sleepHour + (delta > 0 ? 1 : -1);
-            if (newHour > 23) newHour = 0;
-            if (newHour < 0) newHour = 23;
-            config.timeConfig.sleepHour = newHour;
+            int newVal = (int)refHour + (delta > 0 ? 1 : -1);
+            if (newVal > 23) newVal = 0;
+            if (newVal < 0) newVal = 23;
+            refHour = (uint8_t)newVal;
         } else {
-            // Minute
-            int newMinute = config.timeConfig.sleepMinute + (delta > 0 ? 1 : -1);
-            if (newMinute > 59) newMinute = 0;
-            if (newMinute < 0) newMinute = 59;
-            config.timeConfig.sleepMinute = newMinute;
+            int newVal = (int)refMinute + (delta > 0 ? 1 : -1);
+            if (newVal > 59) newVal = 0;
+            if (newVal < 0) newVal = 59;
+            refMinute = (uint8_t)newVal;
         }
         saveConfig();
     } else if (editMode.state == SleepWeekEditMode::SELECTING_MODE) {
@@ -305,14 +307,34 @@ void SleepWeekScheduler::handleEncoderRotate(int delta) {
 
 void SleepWeekScheduler::handleButtonPress() {
     if (editMode.state == SleepWeekEditMode::SELECTING_DAY) {
-        // Toggle selected day
-        toggleDay(editMode.selectedIndex);
+        if (editMode.selectedIndex <= 6) {
+            // Toggle selected day
+            toggleDay(editMode.selectedIndex);
+        } else if (editMode.selectedIndex == 7 || editMode.selectedIndex == 8) {
+            // Enter time editing for sleep (7) or wake (8)
+            editMode.state = SleepWeekEditMode::SELECTING_TIME;
+            editMode.timeField = 0;  // Start with hour
+        } else if (editMode.selectedIndex == 9) {
+            // Cycle through modes
+            int newMode = (int)config.mode + 1;
+            if (newMode > MODE_OFF) newMode = MODE_AUTO_SHOOT;
+            config.mode = (SchedulerMode)newMode;
+            saveConfig();
+        } else if (editMode.selectedIndex == 10) {
+            // Toggle scheduler on/off
+            enableScheduler(!config.schedulerEnabled);
+        }
     } else if (editMode.state == SleepWeekEditMode::SELECTING_TIME) {
-        // Switch between hour/minute
-        editMode.timeField = (editMode.timeField == 0) ? 1 : 0;
+        // Press once: switch hour→minute. Press again: exit back to navigation
+        if (editMode.timeField == 0) {
+            editMode.timeField = 1;
+        } else {
+            editMode.state = SleepWeekEditMode::SELECTING_DAY;
+        }
     } else if (editMode.state == SleepWeekEditMode::SELECTING_MODE) {
-        // Confirm mode selection
+        // Confirm mode, return to navigation
         enableScheduler(true);
+        editMode.state = SleepWeekEditMode::SELECTING_DAY;
     }
 }
 
