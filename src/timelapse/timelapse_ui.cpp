@@ -217,27 +217,6 @@ void renderTimelapseStatusPanel() {
 
     _ft->_canvas->setTextDatum(top_left);
 }
-    }
-    
-    _ft->_canvas->setTextColor(statusColor);
-    _ft->_canvas->drawString(status, 225, y + 5);
-    
-    // Remaining shots (bottom)
-    _ft->_canvas->setFont(&fonts::efontCN_10);
-    _ft->_canvas->setTextDatum(top_center);
-    _ft->_canvas->setTextColor(COLOR_TEXT);
-    int remaining = timelapse.getRemainingShots();
-    if (remaining == -1) {
-        _ft->_canvas->drawString("Infinite", 120, y + 13);
-    } else if (remaining > 0) {
-        char remainStr[32];
-        snprintf(remainStr, sizeof(remainStr), "%d left", remaining);
-        _ft->_canvas->drawString(remainStr, 120, y + 13);
-    } else {
-        _ft->_canvas->setTextColor(COLOR_RED);
-        _ft->_canvas->drawString("Done", 120, y + 13);
-    }
-}
 
 // ============ CONTROL BUTTONS ============
 void renderTimelapseControlButtons() {

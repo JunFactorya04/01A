@@ -78,6 +78,15 @@ public:
     static void setAlarmCallback(void (*cb)(uint8_t hour, uint8_t minute)) {
         s_alarmCb = cb;
     }
+
+    // ===== Initialization =====
+    void init();
+    void loadConfig();
+    void saveConfig();
+
+    // ===== Main Loop =====
+    void update();
+
     // ===== Control =====
     void toggleDay(uint8_t day);
     void setSleepTime(uint8_t hour, uint8_t minute);
