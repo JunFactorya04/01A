@@ -5,8 +5,28 @@
  */
 
 #include "sleep_week_scheduler.h"
+#include "../auto_shoot/auto_shoot.h"
+#include "../timelapse/timelapse.h"
 #include <Preferences.h>
 #include <time.h>
+
+static bool getLocalTimeSafe(struct tm& out)
+{
+    time_t now = time(nullptr);
+    if (now <= 0)
+    {
+        return false;
+    }
+
+    struct tm* local = localtime(&now);
+    if (local == nullptr)
+    {
+        return false;
+    }
+
+    out = *local;
+    return true;
+}
 
 // Global instance
 SleepWeekScheduler sleepWeekScheduler;
@@ -29,6 +49,8 @@ void SleepWeekScheduler::init() {
     state.isScheduled = config.schedulerEnabled;
     state.currentDay = getCurrentDayOfWeek();
     state.lastCheck = millis();
+    state.lastSleepMinuteKey = -1;
+    state.lastWakeMinuteKey = -1;
 }
 
 // ============ CONFIG MANAGEMENT ============
@@ -93,9 +115,9 @@ void SleepWeekScheduler::validateConfig() {
 
 // ============ MAIN UPDATE ============
 void SleepWeekScheduler::update() {
-    // Check every minute
+    // Check every second so minute transitions are not missed.
     unsigned long now = millis();
-    if (now - state.lastCheck < 60000) return;
+    if (now - state.lastCheck < 1000) return;
     state.lastCheck = now;
     
     // Update current day
@@ -154,6 +176,10 @@ void SleepWeekScheduler::setMode(SchedulerMode mode) {
 void SleepWeekScheduler::enableScheduler(bool enable) {
     config.schedulerEnabled = enable;
     state.isScheduled = enable;
+    if (!enable)
+    {
+        state.isSleeping = false;
+    }
     saveConfig();
 }
 
@@ -173,16 +199,43 @@ bool SleepWeekScheduler::shouldSleepNow() {
     
     if (!dayEnabled) return false;
     
-    // Get current time (simplified - using RTC)
-    // In real implementation, get time from RTC
-    // For now, return false
-    return false;
+    struct tm local_time;
+    if (!getLocalTimeSafe(local_time)) {
+        return false;
+    }
+
+    if (local_time.tm_hour != config.timeConfig.sleepHour ||
+        local_time.tm_min != config.timeConfig.sleepMinute) {
+        return false;
+    }
+
+    int32_t minute_key = (local_time.tm_yday * 1440) + (local_time.tm_hour * 60) + local_time.tm_min;
+    if (state.lastSleepMinuteKey == minute_key) {
+        return false;
+    }
+
+    state.lastSleepMinuteKey = minute_key;
+    return true;
 }
 
 bool SleepWeekScheduler::shouldWakeNow() {
-    // Check if it's wake time
-    // In real implementation, get time from RTC
-    return false;
+    struct tm local_time;
+    if (!getLocalTimeSafe(local_time)) {
+        return false;
+    }
+
+    if (local_time.tm_hour != config.timeConfig.wakeHour ||
+        local_time.tm_min != config.timeConfig.wakeMinute) {
+        return false;
+    }
+
+    int32_t minute_key = (local_time.tm_yday * 1440) + (local_time.tm_hour * 60) + local_time.tm_min;
+    if (state.lastWakeMinuteKey == minute_key) {
+        return false;
+    }
+
+    state.lastWakeMinuteKey = minute_key;
+    return true;
 }
 
 void SleepWeekScheduler::enterSleepMode() {
@@ -191,8 +244,9 @@ void SleepWeekScheduler::enterSleepMode() {
     // Set RTC alarm for wake time
     setRTCAlarm(config.timeConfig.wakeHour, config.timeConfig.wakeMinute);
     
-    // Power off
-    digitalWrite(POWER_HOLD_PIN, LOW);
+    // Stop active capture modes while scheduler is sleeping.
+    autoShoot.stop();
+    timelapse.stop();
 }
 
 void SleepWeekScheduler::wakeUp() {
@@ -201,15 +255,16 @@ void SleepWeekScheduler::wakeUp() {
     // Start selected mode
     switch (config.mode) {
         case MODE_AUTO_SHOOT:
-            // Start Auto Shoot
-            // In real implementation, call autoShoot.start()
+            autoShoot.start();
+            timelapse.stop();
             break;
         case MODE_TIMELAPSE:
-            // Start Timelapse
-            // In real implementation, call timelapse.start()
+            timelapse.start();
+            autoShoot.stop();
             break;
         case MODE_OFF:
-            // Do nothing
+            autoShoot.stop();
+            timelapse.stop();
             break;
     }
 }
@@ -314,10 +369,12 @@ bool SleepWeekScheduler::isSleeping() const {
 
 // ============ HELPER FUNCTIONS ============
 uint8_t SleepWeekScheduler::getCurrentDayOfWeek() {
-    // Get current day from RTC
-    // For now, return 0 (Sunday)
-    // In real implementation, get from RTC
-    return 0;
+    struct tm local_time;
+    if (!getLocalTimeSafe(local_time)) {
+        return 0;
+    }
+
+    return (uint8_t)local_time.tm_wday;
 }
 
 void SleepWeekScheduler::setRTCAlarm(uint8_t hour, uint8_t minute) {

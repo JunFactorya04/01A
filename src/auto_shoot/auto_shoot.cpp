@@ -119,12 +119,13 @@ void AutoShoot::updateSensorData() {
     // Get motion detection
     bool hasMotion = isTfLunaMotionDetected();
     
-    // Check if in range AND sensor is fresh
+    // Check if in range and sensor frame is fresh
     bool inRange = (state.currentDistance >= config.rangeMin &&
                    state.currentDistance <= config.rangeMax);
+    bool sensorFresh = isTfLunaFresh();
     
-    // Object detected only if in range with motion
-    state.objectDetected = inRange && hasMotion;
+    // Object detected only for fresh in-range data with motion
+    state.objectDetected = sensorFresh && inRange && hasMotion;
 }
 
 // ============ TRIGGER LOGIC ============
@@ -158,6 +159,7 @@ void AutoShoot::triggerCamera() {
 void AutoShoot::triggerBurst(uint8_t count) {
     for (uint8_t i = 0; i < count; i++) {
         triggerCamera();
+        state.triggerCount++;
         
         // Inter-shot delay: 100ms between shots
         if (i < count - 1) {
@@ -224,6 +226,8 @@ void AutoShoot::start() {
     state.isRunning = true;
     state.wasInRange = false;
     state.lastTrigger = 0;
+    state.lastUpdate = 0;
+    state.triggerCount = 0;
 }
 
 void AutoShoot::stop() {

@@ -16,13 +16,14 @@ void FactoryTest::_sleep_week_test() {
     // Initialize Sleep Week Scheduler
     sleepWeekScheduler.init();
     initSleepWeekUI();
+    _sleep_week_enc_last_pos = _enc.getCount();
+    _reset_mode_input_state();
     
     // Enter loop
     while (1) {
         _sleep_week_loop();
         
-        // Check for power button (exit)
-        if (_check_next(false)) {
+        if (_mode_exit_requested) {
             sleepWeekScheduler.enableScheduler(false);
             break;
         }
@@ -46,49 +47,16 @@ void FactoryTest::_sleep_week_loop() {
 
 // ============ INPUT HANDLING ============
 void FactoryTest::handleSleepWeekInput() {
-    
-    // Read encoder
-    int currentEncPos = _enc.getCount();
-    int encDelta = currentEncPos - _sleep_week_enc_last_pos;
-    _sleep_week_enc_last_pos = currentEncPos;
-    
+    int encDelta = _read_encoder_delta(_sleep_week_enc_last_pos);
     if (encDelta != 0) {
         sleepWeekScheduler.handleEncoderRotate(encDelta);
     }
-    
-    // Read button (GPIO 42)
-    bool btnPressed = (_btn_pwr.read() == 0);  // Active LOW
-    
-    // Button press detection
-    if (btnPressed && !_sleep_week_btn_pressed) {
-        // Button just pressed
-        _sleep_week_btn_pressed = true;
-        _sleep_week_long_press_timer = millis();
-        _tone(1000, 50);  // Short beep
-    }
-    else if (!btnPressed && _sleep_week_btn_pressed) {
-        // Button just released
-        _sleep_week_btn_pressed = false;
-        unsigned long pressDuration = millis() - _sleep_week_long_press_timer;
-        
-        if (pressDuration < 500) {
-            // Short press
-            handleSleepWeekButtonShortPress();
-        } else {
-            // Long press
-            handleSleepWeekButtonLongPress();
-        }
-    }
-    else if (btnPressed && _sleep_week_btn_pressed) {
-        // Button held
-        unsigned long pressDuration = millis() - _sleep_week_long_press_timer;
-        
-        if (pressDuration > 1000) {
-            // Very long press (1s) - exit
-            _sleep_week_btn_pressed = false;
-            _tone(2000, 100);
-            sleepWeekScheduler.enableScheduler(false);
-        }
+
+    ButtonEvent event = _read_mode_button_event();
+    if (event == ButtonEvent::ShortPress) {
+        handleSleepWeekButtonShortPress();
+    } else if (event == ButtonEvent::LongPress) {
+        handleSleepWeekButtonLongPress();
     }
 }
 
@@ -100,8 +68,7 @@ void FactoryTest::handleSleepWeekButtonShortPress() {
 }
 
 void FactoryTest::handleSleepWeekButtonLongPress() {
-    
-    // Disable scheduler
     sleepWeekScheduler.handleButtonLongPress();
+    _mode_exit_requested = true;
     _tone(1500, 150);
 }

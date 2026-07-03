@@ -16,13 +16,14 @@ void FactoryTest::_timelapse_test() {
     // Initialize Timelapse
     timelapse.init();
     initTimelapseUI();
+    _timelapse_enc_last_pos = _enc.getCount();
+    _reset_mode_input_state();
     
     // Enter loop
     while (1) {
         _timelapse_loop();
         
-        // Check for power button (exit)
-        if (_check_next(false)) {
+        if (_mode_exit_requested) {
             timelapse.stop();
             break;
         }
@@ -46,49 +47,16 @@ void FactoryTest::_timelapse_loop() {
 
 // ============ INPUT HANDLING ============
 void FactoryTest::handleTimelapseInput() {
-    
-    // Read encoder
-    int currentEncPos = _enc.getCount();
-    int encDelta = currentEncPos - _timelapse_enc_last_pos;
-    _timelapse_enc_last_pos = currentEncPos;
-    
+    int encDelta = _read_encoder_delta(_timelapse_enc_last_pos);
     if (encDelta != 0) {
         timelapse.handleEncoderRotate(encDelta);
     }
-    
-    // Read button (GPIO 42)
-    bool btnPressed = (_btn_pwr.read() == 0);  // Active LOW
-    
-    // Button press detection
-    if (btnPressed && !_timelapse_btn_pressed) {
-        // Button just pressed
-        _timelapse_btn_pressed = true;
-        _timelapse_long_press_timer = millis();
-        _tone(1000, 50);  // Short beep
-    }
-    else if (!btnPressed && _timelapse_btn_pressed) {
-        // Button just released
-        _timelapse_btn_pressed = false;
-        unsigned long pressDuration = millis() - _timelapse_long_press_timer;
-        
-        if (pressDuration < 500) {
-            // Short press
-            handleTimelapseButtonShortPress();
-        } else {
-            // Long press
-            handleTimelapseButtonLongPress();
-        }
-    }
-    else if (btnPressed && _timelapse_btn_pressed) {
-        // Button held
-        unsigned long pressDuration = millis() - _timelapse_long_press_timer;
-        
-        if (pressDuration > 1000) {
-            // Very long press (1s) - exit
-            _timelapse_btn_pressed = false;
-            _tone(2000, 100);
-            timelapse.stop();
-        }
+
+    ButtonEvent event = _read_mode_button_event();
+    if (event == ButtonEvent::ShortPress) {
+        handleTimelapseButtonShortPress();
+    } else if (event == ButtonEvent::LongPress) {
+        handleTimelapseButtonLongPress();
     }
 }
 
@@ -107,9 +75,8 @@ void FactoryTest::handleTimelapseButtonShortPress() {
 }
 
 void FactoryTest::handleTimelapseButtonLongPress() {
-    
-    // Exit to menu
     timelapse.handleButtonLongPress();
+    _mode_exit_requested = true;
     _tone(1500, 150);
 }
 

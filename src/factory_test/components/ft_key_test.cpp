@@ -185,6 +185,15 @@ bool FactoryTest::_check_next(bool checkPowerOff)
             time_count++;
             if (time_count > 100)
             {
+                if (!checkPowerOff)
+                {
+                    while (!_btn_pwr.read())
+                    {
+                        delay(10);
+                    }
+                    return true;
+                }
+
                 _canvas->fillScreen(TFT_BLACK);
                 _canvas->setFont(&fonts::Font0);
                 _canvas->setTextColor(TFT_RED);

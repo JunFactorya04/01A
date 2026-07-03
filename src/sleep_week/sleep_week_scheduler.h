@@ -47,6 +47,8 @@ struct SleepWeekState {
     bool isScheduled = false;
     uint8_t currentDay = 0;  // 0-6 (Sun-Sat)
     unsigned long lastCheck = 0;
+    int32_t lastSleepMinuteKey = -1;
+    int32_t lastWakeMinuteKey = -1;
 };
 
 // ============ EDIT MODE ============
