@@ -9,8 +9,8 @@
 
 // ============ CONFIG STRUCTURE ============
 struct TriggerConfig {
-    bool triggerEnabled = false;  // Trigger output (GPIO 4)
-    bool wifiBtEnabled = false;   // WiFi/Bluetooth output (GPIO 5)
+    bool triggerEnabled = true;   // G2 (Port B Yellow, GPIO 2) = Trigger (main)
+    bool remoteEnabled  = false;  // G1 (Port B White,  GPIO 1) = Remote  (backup)
 };
 
 // ============ STATE STRUCTURE ============
@@ -50,14 +50,14 @@ public:
     
     // ===== Control =====
     void toggleTrigger();
-    void toggleWifiBt();
+    void toggleRemote();
     void enableAll();
     void disableAll();
     void testTrigger();
     
     // ===== Trigger Functions =====
-    void triggerOut();
-    void triggerWifiBt();
+    void triggerOut();      // G2 (Trigger)
+    void triggerRemote();   // G1 (Remote)
     void triggerBoth();
     
     // ===== UI Interaction =====
@@ -68,7 +68,7 @@ public:
     // ===== Getters =====
     const char* getSelectedItemName();
     bool getTriggerEnabled() const;
-    bool getWifiBtEnabled() const;
+    bool getRemoteEnabled() const;
     bool isRunning() const;
     uint16_t getTriggerCount() const;
     

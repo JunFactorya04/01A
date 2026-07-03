@@ -66,8 +66,8 @@ void FactoryTest::handleTriggerModeButtonShortPress() {
     // For now, just toggle selected output
     triggerMode.handleButtonPress();
     
-    // If both outputs are enabled, also trigger test
-    if (triggerMode.getTriggerEnabled() && triggerMode.getWifiBtEnabled()) {
+    // Test trigger if at least one output is enabled
+    if (triggerMode.getTriggerEnabled() || triggerMode.getRemoteEnabled()) {
         triggerMode.testTrigger();
     }
     

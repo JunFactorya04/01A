@@ -76,11 +76,11 @@ void renderG1G2Labels() {
     _ft->_canvas->setFont(&fonts::efontCN_12);
     _ft->_canvas->setTextDatum(top_left);
     
-    // Trigger Label
+    // Trigger Label (G2 - main)
     renderToggleLabel(0, "Trigger", triggerMode.getTriggerEnabled(), ITEM_Y_START);
     
-    // WiFi/BT Label
-    renderToggleLabel(1, "WiFi/BT", triggerMode.getWifiBtEnabled(), ITEM_Y_START + ITEM_HEIGHT + 8);
+    // Remote Label (G1 - backup)
+    renderToggleLabel(1, "Remote", triggerMode.getRemoteEnabled(), ITEM_Y_START + ITEM_HEIGHT + 8);
 }
 
 void renderToggleLabel(uint8_t index, const char* label, bool enabled, int y) {

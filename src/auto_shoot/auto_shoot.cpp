@@ -158,11 +158,17 @@ void AutoShoot::triggerCamera() {
     // Acquire global trigger lock to prevent conflict with Timelapse
     if (!acquireTriggerLock()) return;
 
-    // Directly drive G2 (Port B, GPIO 5) — HIGH 30ms pulse
-    // Does NOT depend on TriggerMode enable flags
-    digitalWrite(TRIGGER_G2_PIN, HIGH);
+    // Fire G2 (Trigger) and/or G1 (Remote) based on TriggerMode config
+    // If neither enabled, default to G2 (main trigger always works)
+    bool fireG2 = triggerMode.config.triggerEnabled;
+    bool fireG1 = triggerMode.config.remoteEnabled;
+    if (!fireG2 && !fireG1) fireG2 = true;
+
+    if (fireG2) digitalWrite(TRIGGER_G2_PIN, HIGH);
+    if (fireG1) digitalWrite(TRIGGER_G1_PIN, HIGH);
     delay(30);
-    digitalWrite(TRIGGER_G2_PIN, LOW);
+    if (fireG2) digitalWrite(TRIGGER_G2_PIN, LOW);
+    if (fireG1) digitalWrite(TRIGGER_G1_PIN, LOW);
 
     releaseTriggerLock();
 }

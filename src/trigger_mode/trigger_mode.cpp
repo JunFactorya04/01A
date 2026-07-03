@@ -31,7 +31,7 @@ void TriggerMode::init() {
     validateConfig();
     
     // Initialize state
-    state.isRunning = (config.triggerEnabled || config.wifiBtEnabled);
+    state.isRunning = (config.triggerEnabled || config.remoteEnabled);
     state.lastTriggerTime = 0;
     state.triggerCount = 0;
 }
@@ -41,8 +41,8 @@ void TriggerMode::loadConfig() {
     Preferences prefs;
     prefs.begin("triggerMode");
     
-    config.triggerEnabled = prefs.getBool("triggerEnabled", false);
-    config.wifiBtEnabled = prefs.getBool("wifiBtEnabled", false);
+    config.triggerEnabled = prefs.getBool("triggerEnabled", true);   // G2 default ON
+    config.remoteEnabled  = prefs.getBool("remoteEnabled",  false);  // G1 default OFF
     
     prefs.end();
 }
@@ -52,7 +52,7 @@ void TriggerMode::saveConfig() {
     prefs.begin("triggerMode");
     
     prefs.putBool("triggerEnabled", config.triggerEnabled);
-    prefs.putBool("wifiBtEnabled", config.wifiBtEnabled);
+    prefs.putBool("remoteEnabled",  config.remoteEnabled);
     
     prefs.end();
 }
@@ -63,69 +63,46 @@ void TriggerMode::validateConfig() {
 
 // ============ MAIN UPDATE ============
 void TriggerMode::update() {
-    // Update running state based on enabled outputs
-    state.isRunning = (config.triggerEnabled || config.wifiBtEnabled);
-    
-    // Trigger logic will be handled by Auto Shoot or Timelapse
-    // This mode only controls which outputs are active
+    state.isRunning = (config.triggerEnabled || config.remoteEnabled);
 }
 
 // ============ CONTROL ============
 void TriggerMode::toggleTrigger() {
     config.triggerEnabled = !config.triggerEnabled;
-    state.isRunning = (config.triggerEnabled || config.wifiBtEnabled);
+    state.isRunning = (config.triggerEnabled || config.remoteEnabled);
     saveConfig();
 }
 
-void TriggerMode::toggleWifiBt() {
-    config.wifiBtEnabled = !config.wifiBtEnabled;
-    state.isRunning = (config.triggerEnabled || config.wifiBtEnabled);
+void TriggerMode::toggleRemote() {
+    config.remoteEnabled = !config.remoteEnabled;
+    state.isRunning = (config.triggerEnabled || config.remoteEnabled);
     saveConfig();
 }
 
 void TriggerMode::enableAll() {
     config.triggerEnabled = true;
-    config.wifiBtEnabled = true;
+    config.remoteEnabled  = true;
     state.isRunning = true;
     saveConfig();
 }
 
 void TriggerMode::disableAll() {
     config.triggerEnabled = false;
-    config.wifiBtEnabled = false;
+    config.remoteEnabled  = false;
     state.isRunning = false;
     saveConfig();
 }
 
 void TriggerMode::testTrigger() {
-    // Manual test trigger
     triggerOut();
-    if (config.wifiBtEnabled) {
-        triggerWifiBt();
-    }
+    triggerRemote();
 }
 
 // ============ TRIGGER FUNCTIONS ============
+// triggerOut()  — fires G2 (Port B Yellow, GPIO 2) = Trigger (main)
 void TriggerMode::triggerOut() {
     if (!config.triggerEnabled) return;
     
-    // Acquire global trigger lock
-    if (!acquireTriggerLock()) return;
-    
-    digitalWrite(TRIGGER_G1_PIN, HIGH);
-    delay(30);
-    digitalWrite(TRIGGER_G1_PIN, LOW);
-    
-    state.lastTriggerTime = millis();
-    state.triggerCount++;
-    
-    releaseTriggerLock();
-}
-
-void TriggerMode::triggerWifiBt() {
-    if (!config.wifiBtEnabled) return;
-    
-    // Acquire global trigger lock
     if (!acquireTriggerLock()) return;
     
     digitalWrite(TRIGGER_G2_PIN, HIGH);
@@ -138,27 +115,34 @@ void TriggerMode::triggerWifiBt() {
     releaseTriggerLock();
 }
 
-void TriggerMode::triggerBoth() {
-    if (!config.triggerEnabled && !config.wifiBtEnabled) return;
+// triggerRemote() — fires G1 (Port B White, GPIO 1) = Remote (backup)
+void TriggerMode::triggerRemote() {
+    if (!config.remoteEnabled) return;
     
-    // Acquire global trigger lock
     if (!acquireTriggerLock()) return;
     
-    if (config.triggerEnabled) {
-        digitalWrite(TRIGGER_G1_PIN, HIGH);
-    }
-    if (config.wifiBtEnabled) {
-        digitalWrite(TRIGGER_G2_PIN, HIGH);
-    }
+    digitalWrite(TRIGGER_G1_PIN, HIGH);
+    delay(30);
+    digitalWrite(TRIGGER_G1_PIN, LOW);
+    
+    state.lastTriggerTime = millis();
+    state.triggerCount++;
+    
+    releaseTriggerLock();
+}
+
+void TriggerMode::triggerBoth() {
+    if (!config.triggerEnabled && !config.remoteEnabled) return;
+    
+    if (!acquireTriggerLock()) return;
+    
+    if (config.triggerEnabled) digitalWrite(TRIGGER_G2_PIN, HIGH);  // G2
+    if (config.remoteEnabled)  digitalWrite(TRIGGER_G1_PIN, HIGH);  // G1
     
     delay(30);
     
-    if (config.triggerEnabled) {
-        digitalWrite(TRIGGER_G1_PIN, LOW);
-    }
-    if (config.wifiBtEnabled) {
-        digitalWrite(TRIGGER_G2_PIN, LOW);
-    }
+    if (config.triggerEnabled) digitalWrite(TRIGGER_G2_PIN, LOW);
+    if (config.remoteEnabled)  digitalWrite(TRIGGER_G1_PIN, LOW);
     
     state.lastTriggerTime = millis();
     state.triggerCount++;
@@ -181,9 +165,9 @@ void TriggerMode::handleButtonPress() {
     if (editMode.state == TriggerEditMode::SELECTING) {
         // Toggle selected output
         if (editMode.selectedIndex == 0) {
-            toggleTrigger();
+            toggleTrigger();  // G2
         } else {
-            toggleWifiBt();
+            toggleRemote();   // G1
         }
     }
 }
@@ -198,8 +182,8 @@ void TriggerMode::handleButtonLongPress() {
 // ============ GETTERS ============
 const char* TriggerMode::getSelectedItemName() {
     switch (editMode.selectedIndex) {
-        case 0: return "Trigger";
-        case 1: return "WiFi/BT";
+        case 0: return "Trigger";  // G2
+        case 1: return "Remote";   // G1
         default: return "Unknown";
     }
 }
@@ -208,8 +192,8 @@ bool TriggerMode::getTriggerEnabled() const {
     return config.triggerEnabled;
 }
 
-bool TriggerMode::getWifiBtEnabled() const {
-    return config.wifiBtEnabled;
+bool TriggerMode::getRemoteEnabled() const {
+    return config.remoteEnabled;
 }
 
 bool TriggerMode::isRunning() const {

@@ -22,6 +22,9 @@ void Timelapse::init() {
     pinMode(TRIGGER_G2_PIN, OUTPUT);
     digitalWrite(TRIGGER_G2_PIN, LOW);
     
+    // Also init triggerMode so both G1/G2 GPIO are configured and config loaded
+    triggerMode.init();
+    
     // Load saved configuration
     loadConfig();
     
@@ -101,10 +104,17 @@ void Timelapse::triggerCamera() {
     // Acquire global trigger lock to prevent conflict with Auto Shoot
     if (!acquireTriggerLock()) return;
 
-    // Directly drive G2 (Port B Yellow, GPIO 2) — HIGH 30ms pulse
-    digitalWrite(TRIGGER_G2_PIN, HIGH);
+    // Fire G2 (Trigger) and/or G1 (Remote) based on TriggerMode config
+    // If neither enabled, default to G2 (main trigger always works)
+    bool fireG2 = triggerMode.config.triggerEnabled;
+    bool fireG1 = triggerMode.config.remoteEnabled;
+    if (!fireG2 && !fireG1) fireG2 = true;
+
+    if (fireG2) digitalWrite(TRIGGER_G2_PIN, HIGH);
+    if (fireG1) digitalWrite(TRIGGER_G1_PIN, HIGH);
     delay(30);
-    digitalWrite(TRIGGER_G2_PIN, LOW);
+    if (fireG2) digitalWrite(TRIGGER_G2_PIN, LOW);
+    if (fireG1) digitalWrite(TRIGGER_G1_PIN, LOW);
 
     releaseTriggerLock();
 }
