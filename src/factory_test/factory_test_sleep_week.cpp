@@ -7,6 +7,8 @@
 #include "factory_test.h"
 #include "../sleep_week/sleep_week_scheduler.h"
 #include "../sleep_week/sleep_week_ui.h"
+#include "../auto_shoot/auto_shoot.h"
+#include "../timelapse/timelapse.h"
 #include <sys/time.h>
 
 extern FactoryTest* _ft;
@@ -66,6 +68,8 @@ void FactoryTest::_sleep_week_test() {
         
         if (_mode_exit_requested) {
             sleepWeekScheduler.enableScheduler(false);
+            autoShoot.stop();   // stop any capture mode started by wakeUp()
+            timelapse.stop();
             break;
         }
         
@@ -78,11 +82,16 @@ void FactoryTest::_sleep_week_loop() {
     
     // 1. Update Sleep Week Scheduler logic
     sleepWeekScheduler.update();
+
+    // 2. Run active capture modes (started by wakeUp(), safe to call always —
+    //    both guards against isRunning/enable internally)
+    autoShoot.update();
+    timelapse.update();
     
-    // 2. Handle input
+    // 3. Handle input
     handleSleepWeekInput();
     
-    // 3. Render UI
+    // 4. Render UI
     renderSleepWeekUI();
 }
 
