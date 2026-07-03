@@ -25,6 +25,10 @@
 // ============ GLOBAL HARDWARE INSTANCES ============
 extern HardwareSerial TFSerial;
 
+// ============ GLOBAL SPEAKER CONTROL ============
+// Checked by FactoryTest::_tone() — set false to mute all buzzer feedback
+extern bool g_speakerEnabled;
+
 // ============ GLOBAL TRIGGER LOCK ============
 // Prevent double trigger conflict between Auto Shoot and Timelapse
 extern bool g_triggerLock;

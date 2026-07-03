@@ -9,6 +9,7 @@
  *
  */
 #include "factory_test.h"
+#include "../setting/setting.h"
 
 void FactoryTest::init()
 {
@@ -24,6 +25,10 @@ void FactoryTest::init()
     _enc.attachHalfQuad(40, 41);
 
     _enc.setCount(0);
+
+    // Load persisted settings (speaker on/off, etc.)
+    setting.loadConfig();
+    g_speakerEnabled = setting.config.speakerEnabled;
 
     // if (_check_test_mode())
     // {

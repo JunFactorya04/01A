@@ -33,7 +33,7 @@ constexpr AppOptionRenderProps_t _app_render_props_list[] = {
     {0xF6A4A4, 0x762424, "WIFI SCAN", image_data_icon_wifi},
     {0x6AB8A0, 0x163820, "TRIGGER", image_data_icon_encoder},
     // {0xC2C1A5, 0x424125, "MENU DEMO", image_data_icon_menu},
-    {0xF5C396, 0x754316, "MULTILBOX SYNC", image_data_icon_game},
+    {0xF5C396, 0x754316, "SETTING", image_data_icon_menu},
     {0xC6D5EF, 0x46556F, "SLEEP&WAKEUP", image_data_icon_sleep},
     {0xCEDBB8, 0x4E5B38, "POWER OFF", image_data_icon_poweroff},
 };
@@ -220,7 +220,7 @@ class LauncherMenu : public SmoothOptions
         else if (matching_index == 4)
             _ft->_trigger_mode_test();
         else if (matching_index == 5)
-            _ft->_arkanoid_start();
+            _ft->_setting_test();
         else if (matching_index == 6)
             _ft->_sleep_week_test();  // Sleep & Week
         else if (matching_index == 7)

@@ -9,6 +9,9 @@
 // ============ GLOBAL HARDWARE INSTANCES ============
 HardwareSerial TFSerial(1);
 
+// ============ GLOBAL SPEAKER CONTROL ============
+bool g_speakerEnabled = true;
+
 // ============ GLOBAL TRIGGER LOCK ============
 bool g_triggerLock = false;
 

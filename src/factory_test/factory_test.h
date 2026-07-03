@@ -28,6 +28,9 @@
 #define BUZZ_PIN 3
 #define POWER_HOLD_PIN 46
 
+// Global speaker mute (set by Setting mode)
+extern bool g_speakerEnabled;
+
 struct WiFiList_t
 {
     String ssid = "";
@@ -89,7 +92,9 @@ public:
     void _encoder_test_user();
 
     /* Buzzer */
-    inline void _tone(unsigned int frequency, unsigned long duration = 0UL) { tone(BUZZ_PIN, frequency, duration); }
+    inline void _tone(unsigned int frequency, unsigned long duration = 0UL) {
+        if (g_speakerEnabled) tone(BUZZ_PIN, frequency, duration);
+    }
     inline void _noTone() { noTone(BUZZ_PIN); }
 
     /* RTC */
@@ -151,6 +156,14 @@ public:
     bool _mode_btn_pressed = false;
     unsigned long _mode_btn_press_start = 0;
     bool _mode_exit_requested = false;
+
+    /* Setting */
+    void _setting_test();
+    void _setting_loop();
+    void handleSettingInput();
+    void handleSettingButtonShortPress();
+    void handleSettingButtonLongPress();
+    int _setting_enc_last_pos = 0;
 
     /* Arkanoid */
     void _arkanoid_start();
