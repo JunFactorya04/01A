@@ -24,8 +24,8 @@ extern FactoryTest* _ft;
 #define COLOR_BORDER    0x4208
 #define COLOR_HIGHLIGHT 0x27E0
 
-#define ITEM_HEIGHT   18
-#define ITEM_Y_START  22
+#define ITEM_HEIGHT   16
+#define ITEM_Y_START  20
 #define ITEM_INDENT   10
 
 // ============ BLINK ============
@@ -42,6 +42,58 @@ static void updateSettingBlink() {
 // ============ WEEKDAY NAMES ============
 static const char* WDAY_SHORT[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
 
+// ============ GEOPIX LOGO ============
+// Play-button style (right-pointing triangle in dark green rounded box)
+static void drawGeopixLogo(int x, int y) {
+    // Dark green background
+    _ft->_canvas->fillRoundRect(x, y, 28, 28, 6, 0x0300);
+    // Bright lime-green right-pointing triangle
+    _ft->_canvas->fillTriangle(x + 6, y + 5, x + 6, y + 23, x + 23, y + 14, 0x87E0);
+}
+
+// ============ INFO SCREEN ============
+static void renderInfoScreen() {
+    _ft->_canvas->fillScreen(COLOR_BG);
+
+    // ── Logo ──
+    drawGeopixLogo(12, 10);
+
+    // ── Company name ──
+    _ft->_canvas->setFont(&fonts::efontCN_16);
+    _ft->_canvas->setTextDatum(top_left);
+    _ft->_canvas->setTextColor(0x87E0);   // lime green
+    _ft->_canvas->drawString("Geopix Digital", 47, 10);
+    _ft->_canvas->setTextColor(COLOR_TEXT);
+    _ft->_canvas->drawString("Solutions", 47, 28);
+
+    // ── Divider ──
+    _ft->_canvas->drawFastHLine(8, 48, 224, COLOR_BORDER);
+
+    // ── Website & version ──
+    _ft->_canvas->setFont(&fonts::efontCN_12);
+    _ft->_canvas->setTextColor(COLOR_TEXT);
+    _ft->_canvas->drawString("Website:", 12, 55);
+    _ft->_canvas->setTextColor(0x87E0);
+    _ft->_canvas->drawString("www.geopix.tw", 70, 55);
+
+    _ft->_canvas->setTextColor(COLOR_TEXT);
+    _ft->_canvas->drawString("Version:", 12, 70);
+    _ft->_canvas->setTextColor(COLOR_GREEN);
+    _ft->_canvas->drawString("v1.1", 70, 70);
+
+    // ── Copyright ──
+    _ft->_canvas->setFont(&fonts::efontCN_10);
+    _ft->_canvas->setTextColor(COLOR_BORDER);
+    _ft->_canvas->drawString("(C) 2025 Geopix Digital Solutions", 12, 88);
+    _ft->_canvas->drawString("All Rights Reserved.", 12, 100);
+
+    // ── Return hint ──
+    _ft->_canvas->setTextDatum(bottom_center);
+    _ft->_canvas->setTextColor(COLOR_BORDER);
+    _ft->_canvas->drawString("< Press to return >", 120, 133);
+    _ft->_canvas->setTextDatum(top_left);
+}
+
 // ============ FORWARD DECLARATIONS ============
 void renderSettingHeader();
 void renderSettingItems();
@@ -53,12 +105,15 @@ void renderSettingUI() {
     if (!_ft || !_ft->_canvas) return;
 
     updateSettingBlink();
-
     _ft->_canvas->setTextWrap(false);
     _ft->_canvas->fillScreen(COLOR_BG);
 
-    renderSettingHeader();
-    renderSettingItems();
+    if (setting.editMode.state == SettingEditMode::SHOWING_INFO) {
+        renderInfoScreen();
+    } else {
+        renderSettingHeader();
+        renderSettingItems();
+    }
 
     _ft->_canvas_update();
 }
@@ -125,6 +180,9 @@ void renderSettingItems() {
     snprintf(valBuf, sizeof(valBuf), "%s",
              setting.config.speakerEnabled ? "ON" : "OFF");
     renderSettingItem(5, "Speaker", valBuf, spkColor);
+
+    // ── Info ──
+    renderSettingItem(6, "Info", ">", COLOR_BORDER);
 }
 
 void renderSettingItem(uint8_t index, const char* label, const char* valueStr,

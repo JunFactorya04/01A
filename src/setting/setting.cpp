@@ -105,7 +105,7 @@ void Setting::handleEncoderRotate(int delta) {
 
     if (editMode.state == SettingEditMode::SELECTING) {
         int newIdx = (int)editMode.selectedIndex + delta;
-        if (newIdx >= 0 && newIdx <= 5) editMode.selectedIndex = (uint8_t)newIdx;
+        if (newIdx >= 0 && newIdx <= 6) editMode.selectedIndex = (uint8_t)newIdx;
 
     } else if (editMode.state == SettingEditMode::EDITING) {
         switch (editMode.selectedIndex) {
@@ -166,11 +166,17 @@ void Setting::handleButtonPress() {
             config.speakerEnabled = !config.speakerEnabled;
             g_speakerEnabled = config.speakerEnabled;
             saveConfig();
+        } else if (editMode.selectedIndex == 6) {
+            // Info screen
+            editMode.state = SettingEditMode::SHOWING_INFO;
         } else {
             editMode.state = SettingEditMode::EDITING;
         }
     } else if (editMode.state == SettingEditMode::EDITING) {
         clampDateTime();
+        editMode.state = SettingEditMode::SELECTING;
+    } else if (editMode.state == SettingEditMode::SHOWING_INFO) {
+        // Any press returns to selecting
         editMode.state = SettingEditMode::SELECTING;
     }
 }

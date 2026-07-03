@@ -25,9 +25,9 @@ struct SettingConfig {
 
 // ============ EDIT MODE ============
 struct SettingEditMode {
-    enum EditState { IDLE = 0, SELECTING = 1, EDITING = 2 } state = IDLE;
+    enum EditState { IDLE = 0, SELECTING = 1, EDITING = 2, SHOWING_INFO = 3 } state = IDLE;
     uint8_t selectedIndex = 0;
-    // 0=Year  1=Month  2=Day  3=Hour  4=Minute  5=Speaker
+    // 0=Year  1=Month  2=Day  3=Hour  4=Minute  5=Speaker  6=Info
 };
 
 // ============ RTC CALLBACKS ============
