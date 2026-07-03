@@ -54,9 +54,11 @@ const char* formatInterval(int ms) {
     if (ms >= 60000) {
         int minutes = ms / 60000;
         int seconds = (ms % 60000) / 1000;
-        snprintf(buffer, sizeof(buffer), "%dm %ds", minutes, seconds);
-    } else {
+        snprintf(buffer, sizeof(buffer), "%dm%ds", minutes, seconds);
+    } else if (ms >= 1000) {
         snprintf(buffer, sizeof(buffer), "%ds", ms / 1000);
+    } else {
+        snprintf(buffer, sizeof(buffer), "%dms", ms);
     }
     return buffer;
 }
@@ -169,35 +171,52 @@ void renderTimelapseSettingsItem(uint8_t index, const char* label, float value, 
 // ============ STATUS PANEL ============
 void renderTimelapseStatusPanel() {
     int y = 88;
-    
-    // Panel border
-    _ft->_canvas->drawRoundRect(8, y, 224, 24, 5, COLOR_BORDER);
-    
+
+    _ft->_canvas->drawRoundRect(8, y, 224, 26, 5, COLOR_BORDER);
+
+    // Row 1: Shots (left) + Status (right) — all efontCN_12, no overlap
     _ft->_canvas->setFont(&fonts::efontCN_12);
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(COLOR_TEXT);
-    
-    // Left side: Shot count
-    _ft->_canvas->drawString("Shots:", 12, y + 5);
+    _ft->_canvas->drawString("Shots:", 12, y + 4);
+
     _ft->_canvas->setTextColor(COLOR_GREEN);
-    _ft->_canvas->setFont(&fonts::efontCN_16);
     char countStr[16];
     snprintf(countStr, sizeof(countStr), "%d", timelapse.getShotCount());
-    _ft->_canvas->drawString(countStr, 50, y + 3);
-    
-    // Right side: Status
-    _ft->_canvas->setFont(&fonts::efontCN_12);
-    _ft->_canvas->setTextDatum(top_right);
+    _ft->_canvas->drawString(countStr, 52, y + 4);
+
     _ft->_canvas->setTextColor(COLOR_TEXT);
-    _ft->_canvas->drawString("St:", 155, y + 5);
-    
-    // Status indicator
+    _ft->_canvas->setTextDatum(top_right);
+    _ft->_canvas->drawString("St:", 155, y + 4);
+
     const char* status = timelapse.getStatusString();
     uint16_t statusColor = COLOR_GREEN;
     if (strcmp(status, "IDLE") == 0) {
         statusColor = COLOR_TEXT;
     } else if (strcmp(status, "RUNNING") == 0) {
         statusColor = COLOR_YELLOW;
+    }
+    _ft->_canvas->setTextColor(statusColor);
+    _ft->_canvas->drawString(status, 230, y + 4);
+
+    // Row 2: Remaining shots centered
+    _ft->_canvas->setFont(&fonts::efontCN_10);
+    _ft->_canvas->setTextDatum(top_center);
+    _ft->_canvas->setTextColor(COLOR_TEXT);
+    int remaining = timelapse.getRemainingShots();
+    if (remaining == -1) {
+        _ft->_canvas->drawString("Infinite", 120, y + 14);
+    } else if (remaining > 0) {
+        char remainStr[32];
+        snprintf(remainStr, sizeof(remainStr), "%d left", remaining);
+        _ft->_canvas->drawString(remainStr, 120, y + 14);
+    } else {
+        _ft->_canvas->setTextColor(COLOR_RED);
+        _ft->_canvas->drawString("Done", 120, y + 14);
+    }
+
+    _ft->_canvas->setTextDatum(top_left);
+}
     }
     
     _ft->_canvas->setTextColor(statusColor);
@@ -222,8 +241,8 @@ void renderTimelapseStatusPanel() {
 
 // ============ CONTROL BUTTONS ============
 void renderTimelapseControlButtons() {
-    // START button (left)
-    int btnY = 115;
+    // START/STOP visual indicators (Enable toggle is via index 2 in settings)
+    int btnY = 117;
     int btnHeight = 14;
     
     _ft->_canvas->drawRoundRect(12, btnY, 100, btnHeight, 3, 

@@ -30,7 +30,7 @@ void Timelapse::init() {
     
     // Initialize state
     state.isRunning = false;
-    state.lastShotTime = 0;
+    state.lastShotTime = millis();  // prevent immediate trigger if enable=true on load
     state.shotCount = 0;
 }
 
