@@ -99,6 +99,13 @@ void TriggerMode::testTrigger() {
 }
 
 // ============ TRIGGER FUNCTIONS ============
+// Short beep on fire — respects global speaker on/off (Setting mode).
+static inline void triggerBeep() {
+    if (g_speakerEnabled) {
+        tone(BUZZ_PIN, 2500, 40);
+    }
+}
+
 // triggerOut()  — fires G2 (Port B Yellow, GPIO 2) = Trigger (main)
 void TriggerMode::triggerOut() {
     if (!config.triggerEnabled) return;
@@ -106,6 +113,7 @@ void TriggerMode::triggerOut() {
     if (!acquireTriggerLock()) return;
     
     digitalWrite(TRIGGER_G2_PIN, HIGH);
+    triggerBeep();
     delay(30);
     digitalWrite(TRIGGER_G2_PIN, LOW);
     
@@ -122,6 +130,7 @@ void TriggerMode::triggerRemote() {
     if (!acquireTriggerLock()) return;
     
     digitalWrite(TRIGGER_G1_PIN, HIGH);
+    triggerBeep();
     delay(30);
     digitalWrite(TRIGGER_G1_PIN, LOW);
     
@@ -138,6 +147,7 @@ void TriggerMode::triggerBoth() {
     
     if (config.triggerEnabled) digitalWrite(TRIGGER_G2_PIN, HIGH);  // G2
     if (config.remoteEnabled)  digitalWrite(TRIGGER_G1_PIN, HIGH);  // G1
+    triggerBeep();
     
     delay(30);
     
