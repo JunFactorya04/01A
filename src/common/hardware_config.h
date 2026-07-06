@@ -22,6 +22,11 @@
 #define BATTERY_ADC_PIN 10
 #define TFLUNA_RX_PIN 13
 
+// ============ TF-LUNA I2C (Port A: SDA=GPIO13, SCL=GPIO15) ============
+#define TFLUNA_I2C_ADDR 0x10
+#define TFLUNA_SDA_PIN  13
+#define TFLUNA_SCL_PIN  15
+
 // ============ GLOBAL HARDWARE INSTANCES ============
 extern HardwareSerial TFSerial;
 

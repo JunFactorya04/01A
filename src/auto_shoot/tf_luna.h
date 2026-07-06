@@ -1,27 +1,24 @@
 /**
  * @file tf_luna.h
- * @brief TF-Luna LiDAR sensor driver with motion detection & filtering
- * @date 2026-07-01
+ * @brief TF-Luna LiDAR driver — I2C mode, pure distance read + normalization
+ * @date 2026-07-06
+ *
+ * I2C: SDA=GPIO13, SCL=GPIO15, addr=0x10, bus=Wire1
+ * (RTC BM8563 uses Wire/bus0 on GPIO11/12 — separate bus, no conflict)
  */
 
 #pragma once
 #include "../common/hardware_config.h"
+#include <Wire.h>
 
 // ============ TF-LUNA CONFIG ============
-#define TFLUNA_MIN_STRENGTH 100      // Minimum signal strength (0-65535)
-#define TFLUNA_MIN_DISTANCE 0.1f     // Meters
-#define TFLUNA_MAX_DISTANCE 8.0f     // Meters
-#define TFLUNA_FILTER_ALPHA 0.6f     // Low-pass filter (0.0-1.0)
-#define TFLUNA_MOTION_THRESHOLD 0.05f // 5cm for motion detection
-#define TFLUNA_OUTLIER_THRESHOLD 0.5f // 50cm max jump (outlier detection)
+#define TFLUNA_MAX_DISTANCE 8.0f     // Meters (no-return / clamp value)
 
 // ============ SENSOR STATE ============
 struct TFLunaState {
-    float distance_m = 0.0f;
-    float distance_filtered = 0.0f;
+    float distance_m = TFLUNA_MAX_DISTANCE;
     uint16_t strength = 0;
-    bool hasMotion = false;
-    float velocity = 0.0f;  // Change per update
+    bool valid = false;
     unsigned long lastUpdateTime = 0;
 };
 
@@ -29,171 +26,95 @@ static TFLunaState tfLunaState;
 
 // ============ INITIALIZATION ============
 void initTfLuna() {
-    TFSerial.begin(115200, SERIAL_8N1, TFLUNA_RX_PIN, -1);
-    delay(100);
+    // Dedicated I2C bus (Wire1) for TF-Luna
+    Wire1.begin(TFLUNA_SDA_PIN, TFLUNA_SCL_PIN);
+    tfLunaState.distance_m     = TFLUNA_MAX_DISTANCE;
+    tfLunaState.valid          = false;
     tfLunaState.lastUpdateTime = millis();
 }
 
-// ============ RAW READ ============
+// ============ RAW READ (I2C) ============
+// Reads the 9-byte data frame, validates 0x59 0x59 header,
+// converts + normalizes distance (0mm or >8000mm -> 8.0m).
 bool readTfLunaRaw(float &distance_m, uint16_t &strength) {
 
-    // Drain stale frames — keep only the latest one in buffer
-    while (TFSerial.available() > 9) {
-        TFSerial.read();
+    uint8_t buf[9];
+
+    Wire1.beginTransmission(TFLUNA_I2C_ADDR);
+    Wire1.write((uint8_t)0x00);
+    if (Wire1.endTransmission() != 0) {
+        return false;
     }
 
-    if (TFSerial.available() >= 9) {
-        
-        uint8_t buf[9];
-        TFSerial.readBytes(buf, 9);
-        
-        // HEADER CHECK (0x59 0x59)
-        if (buf[0] == 0x59 && buf[1] == 0x59) {
-            
-            uint16_t dist_mm = buf[2] + (buf[3] << 8);
-            strength = buf[4] + (buf[5] << 8);
-            
-            distance_m = dist_mm / 1000.0f;
-            
-            return true;
-        }
+    Wire1.requestFrom((int)TFLUNA_I2C_ADDR, 9);
+    int i = 0;
+    while (Wire1.available() && i < 9) {
+        buf[i++] = Wire1.read();
     }
-    
-    return false;
-}
 
-// ============ FILTERING ============
-void applyLowPassFilter(float rawDistance) {
-    // Low-pass filter to smooth sensor noise
-    // TFLUNA_FILTER_ALPHA closer to 1.0 = more responsive
-    // TFLUNA_FILTER_ALPHA closer to 0.0 = more smooth
-    tfLunaState.distance_filtered = 
-        (rawDistance * TFLUNA_FILTER_ALPHA) + 
-        (tfLunaState.distance_filtered * (1.0f - TFLUNA_FILTER_ALPHA));
-}
+    if (i != 9) return false;
+    if (buf[0] != 0x59 || buf[1] != 0x59) return false;
 
-// ============ VALIDATION ============
-bool validateDistance(float distance_m, uint16_t strength) {
-    
-    // 1. Check signal strength
-    if (strength < TFLUNA_MIN_STRENGTH) {
-        return false;  // Signal too weak
+    uint16_t dist_mm = buf[2] + (buf[3] << 8);
+    strength = buf[4] + (buf[5] << 8);
+
+    // ---- NORMALIZE ----
+    if (dist_mm == 0) {
+        distance_m = TFLUNA_MAX_DISTANCE;      // no return -> treat as far
+    } else if (dist_mm > 8000) {
+        distance_m = TFLUNA_MAX_DISTANCE;      // clamp to 8.0m
+    } else {
+        distance_m = dist_mm / 1000.0f;
     }
-    
-    // 2. Check distance range
-    if (distance_m < TFLUNA_MIN_DISTANCE || distance_m > TFLUNA_MAX_DISTANCE) {
-        return false;  // Out of valid range
-    }
-    
-    // 3. Outlier detection — skip if not yet initialized (distance_m == 0)
-    //    At startup distance_m=0, so any real reading would be rejected forever.
-    if (tfLunaState.distance_m > 0.0f) {
-        float delta = abs(distance_m - tfLunaState.distance_m);
-        if (delta > TFLUNA_OUTLIER_THRESHOLD) {
-            return false;  // Possible outlier/spike
-        }
-    }
-    
+
     return true;
-}
-
-// ============ MOTION DETECTION ============
-void detectMotion(float currentDistance) {
-    
-    // Calculate velocity (change in distance)
-    tfLunaState.velocity = abs(currentDistance - tfLunaState.distance_m);
-    
-    // Detect motion if velocity exceeds threshold
-    tfLunaState.hasMotion = (tfLunaState.velocity > TFLUNA_MOTION_THRESHOLD);
 }
 
 // ============ MAIN UPDATE ============
 void updateTfLunaRaw() {
-    
-    float rawDistance = 0.0f;
-    uint16_t strength = 0;
-    
-    // Try to read from sensor
-    if (!readTfLunaRaw(rawDistance, strength)) {
-        return;  // No valid frame
+    float    d = TFLUNA_MAX_DISTANCE;
+    uint16_t s = 0;
+
+    if (!readTfLunaRaw(d, s)) {
+        tfLunaState.valid = false;             // read failed this cycle
+        return;
     }
-    
-    // Validate reading
-    if (!validateDistance(rawDistance, strength)) {
-        return;  // Invalid reading
-    }
-    
-    // Update raw distance
-    tfLunaState.distance_m = rawDistance;
-    tfLunaState.strength = strength;
-    
-    // Apply filtering
-    applyLowPassFilter(rawDistance);
-    
-    // Detect motion
-    detectMotion(rawDistance);
-    
-    // Update timestamp
+
+    tfLunaState.distance_m     = d;
+    tfLunaState.strength       = s;
+    tfLunaState.valid          = true;
     tfLunaState.lastUpdateTime = millis();
 }
 
 // ============ PUBLIC INTERFACE ============
 
-/**
- * @brief Get filtered distance (preferred for auto-shoot)
- * @return Smoothed distance in meters
- */
+/** @brief Poll sensor and return normalized distance (meters). */
 float readTfLunaDistance() {
-    updateTfLunaRaw();
-    return tfLunaState.distance_filtered;
-}
-
-/**
- * @brief Get raw distance without filter
- * @return Raw distance in meters
- */
-float readTfLunaDistanceRaw() {
     updateTfLunaRaw();
     return tfLunaState.distance_m;
 }
 
-/**
- * @brief Check if object is moving
- * @return true if motion detected
- */
-bool isTfLunaMotionDetected() {
-    return tfLunaState.hasMotion;
+/** @brief Last distance without polling. */
+float readTfLunaDistanceRaw() {
+    return tfLunaState.distance_m;
 }
 
-/**
- * @brief Get signal strength
- * @return Signal strength (0-65535)
- */
+/** @brief Signal strength (0-65535). */
 uint16_t getTfLunaStrength() {
     return tfLunaState.strength;
 }
 
-/**
- * @brief Get velocity (change rate)
- * @return Velocity in meters per update
- */
-float getTfLunaVelocity() {
-    return tfLunaState.velocity;
+/** @brief Motion detection kept for interface compatibility (unused in pure-threshold). */
+bool isTfLunaMotionDetected() {
+    return false;
 }
 
-/**
- * @brief Get sensor state
- * @return Full sensor state struct
- */
+/** @brief Full sensor state. */
 const TFLunaState& getTfLunaState() {
     return tfLunaState;
 }
 
-/**
- * @brief Check if sensor is fresh (updated recently)
- * @param maxAgeMs Maximum age in milliseconds
- * @return true if updated within maxAgeMs
- */
+/** @brief True if the last read succeeded within maxAgeMs. */
 bool isTfLunaFresh(unsigned long maxAgeMs = 200) {
-    return (millis() - tfLunaState.lastUpdateTime) < maxAgeMs;
+    return tfLunaState.valid && ((millis() - tfLunaState.lastUpdateTime) < maxAgeMs);
 }

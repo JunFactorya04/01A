@@ -20,17 +20,15 @@ AutoShoot::AutoShoot() {
 
 // ============ INITIALIZATION ============
 void AutoShoot::init() {
-    // Initialize TF-Luna sensor
+    // Initialize TF-Luna sensor (I2C)
     initTfLuna();
-    
-    // Initialize G2 output pin (Port B, GPIO 5) for camera/DIN trigger
+
+    // Initialize dual trigger output pins: G2 = main, G1 = backup mirror
     pinMode(TRIGGER_G2_PIN, OUTPUT);
+    pinMode(TRIGGER_G1_PIN, OUTPUT);
     digitalWrite(TRIGGER_G2_PIN, LOW);
-    
-    // Also initialize triggerMode so G1/G2 GPIO are properly configured
-    // and saved settings are loaded
-    triggerMode.init();
-    
+    digitalWrite(TRIGGER_G1_PIN, LOW);
+
     // Load saved configuration
     loadConfig();
     
@@ -100,57 +98,40 @@ void AutoShoot::validateConfig() {
 // ============ MAIN UPDATE ============
 void AutoShoot::update() {
     if (!state.isRunning) return;
-    
-    unsigned long now = millis();
-    
-    // Update at ~10Hz (100ms interval)
-    if (now - state.lastUpdate < 100) return;
-    state.lastUpdate = now;
-    
-    // 1. Read and process sensor
+
+    // Pure threshold — poll every cycle for minimal latency (no throttle)
     updateSensorData();
-    
-    // 2. Check and trigger
-    checkAndTrigger();
 }
 
-// ============ SENSOR ============
+// ============ SENSOR + PURE THRESHOLD GPIO OUTPUT ============
 void AutoShoot::updateSensorData() {
-    // Use filtered distance (motion-aware)
+    // Poll TF-Luna (I2C) — returns normalized distance
     state.currentDistance = readTfLunaDistance();
     state.currentStrength = getTfLunaStrength();
-    
-    // Get motion detection
-    bool hasMotion = isTfLunaMotionDetected();
-    
-    // Check if in range and sensor frame is fresh
-    bool inRange = (state.currentDistance >= config.rangeMin &&
+
+    bool sensorOk = getTfLunaState().valid;
+
+    // inZone = MIN_RANGE <= distance <= MAX_RANGE
+    bool inZone = sensorOk &&
+                  (state.currentDistance >= config.rangeMin &&
                    state.currentDistance <= config.rangeMax);
-    bool sensorFresh = isTfLunaFresh();
-    
-    // Object detected only for fresh in-range data with motion
-    state.objectDetected = sensorFresh && inRange && hasMotion;
+
+    state.objectDetected = inZone;
+
+    // Direct GPIO output: G2 = main trigger, G1 = backup mirror (exact)
+    if (inZone) {
+        digitalWrite(TRIGGER_G2_PIN, HIGH);
+        digitalWrite(TRIGGER_G1_PIN, HIGH);
+    } else {
+        digitalWrite(TRIGGER_G2_PIN, LOW);
+        digitalWrite(TRIGGER_G1_PIN, LOW);
+    }
 }
 
 // ============ TRIGGER LOGIC ============
 void AutoShoot::checkAndTrigger() {
-    unsigned long now = millis();
-    
-    // Edge detection: object ENTERED zone (transition from out to in)
-    if (state.objectDetected && !state.wasInRange) {
-        
-        // Check cooldown before triggering
-        if (now - state.lastTrigger > config.cooldownMs) {
-            
-            // Trigger burst shots
-            triggerBurst(config.burstShots);
-            
-            state.lastTrigger = now;
-        }
-    }
-    
-    // Update previous state for next cycle
-    state.wasInRange = state.objectDetected;
+    // Pure threshold: GPIO driven directly in updateSensorData().
+    // No edge detection / cooldown / burst.
 }
 
 // ============ CAMERA TRIGGER ============
@@ -256,6 +237,11 @@ void AutoShoot::start() {
 void AutoShoot::stop() {
     state.isRunning = false;
     state.wasInRange = false;
+    state.objectDetected = false;
+
+    // Drive both trigger outputs LOW when stopped
+    digitalWrite(TRIGGER_G2_PIN, LOW);
+    digitalWrite(TRIGGER_G1_PIN, LOW);
 }
 
 // ============ GETTERS ============
