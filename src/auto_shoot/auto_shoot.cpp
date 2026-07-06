@@ -29,6 +29,9 @@ void AutoShoot::init() {
     digitalWrite(TRIGGER_G2_PIN, LOW);
     digitalWrite(TRIGGER_G1_PIN, LOW);
 
+    // Load TRIGGER mode master-switch config (which outputs are authorized)
+    triggerMode.loadConfig();
+
     // Load saved configuration
     loadConfig();
     
@@ -118,10 +121,17 @@ void AutoShoot::updateSensorData() {
 
     state.objectDetected = inZone;
 
-    // Direct GPIO output: G2 = main trigger, G1 = backup mirror (exact)
+    // TRIGGER mode is the master switch that decides which outputs are used:
+    //   triggerEnabled -> G2 (main), remoteEnabled -> G1 (backup mirror)
+    //   fallback: if neither enabled, G2 always works
+    bool useG2 = triggerMode.config.triggerEnabled;
+    bool useG1 = triggerMode.config.remoteEnabled;
+    if (!useG2 && !useG1) useG2 = true;
+
+    // Pure threshold level output
     if (inZone) {
-        digitalWrite(TRIGGER_G2_PIN, HIGH);
-        digitalWrite(TRIGGER_G1_PIN, HIGH);
+        digitalWrite(TRIGGER_G2_PIN, useG2 ? HIGH : LOW);
+        digitalWrite(TRIGGER_G1_PIN, useG1 ? HIGH : LOW);
     } else {
         digitalWrite(TRIGGER_G2_PIN, LOW);
         digitalWrite(TRIGGER_G1_PIN, LOW);

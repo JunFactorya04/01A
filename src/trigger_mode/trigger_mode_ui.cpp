@@ -86,25 +86,23 @@ void renderG1G2Labels() {
 void renderToggleLabel(uint8_t index, const char* label, bool enabled, int y) {
     bool isSelected = (triggerMode.editMode.selectedIndex == index);
     
-    // Background highlight
+    // Background highlight — match AUTO SHOOT (COLOR_BORDER when selected)
     if (isSelected) {
-        _ft->_canvas->fillRoundRect(10, y - 3, 220, 26, 5, COLOR_HIGHLIGHT);
+        _ft->_canvas->fillRoundRect(10, y - 3, 220, 26, 5, COLOR_BORDER);
     }
     
-    // Text color
-    uint16_t textColor = isSelected ? COLOR_BG : COLOR_TEXT;
-    _ft->_canvas->setTextColor(textColor);
-    
-    // Label
+    // Label text — selected: black on border, else white (AUTO SHOOT style)
+    _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_TEXT);
+    _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->drawString(label, ITEM_INDENT, y + 6);
     
-    // ON/OFF indicator
+    // ON/OFF indicator — green/red like AUTO SHOOT speaker/status
     _ft->_canvas->setTextDatum(top_right);
     _ft->_canvas->setTextColor(enabled ? COLOR_GREEN : COLOR_RED);
     _ft->_canvas->drawString(enabled ? "ON" : "OFF", 220, y + 6);
     
     // Arrow indicator
-    _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_BLUE);
+    _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_GREEN);
     _ft->_canvas->drawString(">", 235, y + 6);
     
     _ft->_canvas->setTextDatum(top_left);
@@ -139,14 +137,20 @@ void renderTriggerStatusPanel() {
 // ============ TEST BUTTON ============
 void renderTestButton() {
     int y = 115;
-    
-    // Button
-    _ft->_canvas->drawRoundRect(60, y, 120, 14, 3, COLOR_BORDER);
-    
+    bool isSelected = (triggerMode.editMode.selectedIndex == 2);
+
+    // Selected: filled highlight (AUTO SHOOT START/STOP style)
+    if (isSelected) {
+        _ft->_canvas->fillRoundRect(60, y, 120, 14, 3, COLOR_HIGHLIGHT);
+    } else {
+        _ft->_canvas->drawRoundRect(60, y, 120, 14, 3, COLOR_GREEN);
+    }
+
     _ft->_canvas->setFont(&fonts::efontCN_10);
     _ft->_canvas->setTextDatum(top_center);
-    _ft->_canvas->setTextColor(COLOR_TEXT);
+    _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_GREEN);
     _ft->_canvas->drawString("TEST TRIGGER", 120, y + 2);
+    _ft->_canvas->setTextDatum(top_left);
 }
 
 // ============ INIT ============

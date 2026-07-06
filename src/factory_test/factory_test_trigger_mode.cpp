@@ -24,7 +24,8 @@ void FactoryTest::_trigger_mode_test() {
         _trigger_mode_loop();
         
         if (_mode_exit_requested) {
-            triggerMode.disableAll();
+            // Persist config — do NOT disableAll (master switch must survive exit)
+            triggerMode.saveConfig();
             break;
         }
         
@@ -61,16 +62,8 @@ void FactoryTest::handleTriggerModeInput() {
 }
 
 void FactoryTest::handleTriggerModeButtonShortPress() {
-    
-    // Check if in TEST button area (simplified: if selected index is 2)
-    // For now, just toggle selected output
+    // Delegate to TriggerMode: index 0=toggle Trigger, 1=toggle Remote, 2=TEST fire
     triggerMode.handleButtonPress();
-    
-    // Test trigger if at least one output is enabled
-    if (triggerMode.getTriggerEnabled() || triggerMode.getRemoteEnabled()) {
-        triggerMode.testTrigger();
-    }
-    
     _tone(800, 100);
 }
 

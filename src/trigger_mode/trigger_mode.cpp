@@ -153,9 +153,9 @@ void TriggerMode::triggerBoth() {
 // ============ UI INTERACTION ============
 void TriggerMode::handleEncoderRotate(int delta) {
     if (editMode.state == TriggerEditMode::SELECTING) {
-        // Navigate between G1 and G2
+        // Navigate: 0=Trigger(G2), 1=Remote(G1), 2=TEST button
         int newIndex = editMode.selectedIndex + (delta > 0 ? 1 : -1);
-        if (newIndex >= 0 && newIndex <= 1) {
+        if (newIndex >= 0 && newIndex <= 2) {
             editMode.selectedIndex = newIndex;
         }
     }
@@ -163,18 +163,19 @@ void TriggerMode::handleEncoderRotate(int delta) {
 
 void TriggerMode::handleButtonPress() {
     if (editMode.state == TriggerEditMode::SELECTING) {
-        // Toggle selected output
         if (editMode.selectedIndex == 0) {
-            toggleTrigger();  // G2
-        } else {
-            toggleRemote();   // G1
+            toggleTrigger();   // G2 — saves config
+        } else if (editMode.selectedIndex == 1) {
+            toggleRemote();    // G1 — saves config
+        } else if (editMode.selectedIndex == 2) {
+            testTrigger();     // fire enabled outputs once
         }
     }
 }
 
 void TriggerMode::handleButtonLongPress() {
-    // Long press: disable all and exit
-    disableAll();
+    // Long press: exit only. Config already persisted on each toggle.
+    // DO NOT disableAll() — that would wipe the master-switch settings.
     editMode.state = TriggerEditMode::IDLE;
     editMode.selectedIndex = 0;
 }
