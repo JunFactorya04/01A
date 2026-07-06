@@ -9,13 +9,52 @@
  *
  */
 #include "../factory_test.h"
+#include "../../common/hardware_config.h"
 
 void FactoryTest::_power_on()
 {
-    /* Hold pwr pin */
+    /* Hold pwr pin — latch power so the system stays alive during the check */
     gpio_reset_pin((gpio_num_t)POWER_HOLD_PIN);
     pinMode(POWER_HOLD_PIN, OUTPUT);
     digitalWrite(POWER_HOLD_PIN, HIGH);
+
+    /* Read the power button (active-low) */
+    pinMode(POWER_BUTTON_PIN, INPUT_PULLUP);
+    delay(20);
+
+    // If the button is being pressed at boot -> user is powering on manually:
+    // require a ~2s continuous hold to confirm. Release early -> power off.
+    // If the button is NOT pressed (e.g. RTC scheduled wake) -> power on now.
+    if (digitalRead(POWER_BUTTON_PIN) == LOW)
+    {
+        const int required_ms = 2000;
+        int held_ms = 0;
+
+        while (digitalRead(POWER_BUTTON_PIN) == LOW)
+        {
+            delay(20);
+            held_ms += 20;
+            if (held_ms >= required_ms)
+            {
+                break;  // confirmed power-on
+            }
+        }
+
+        if (held_ms < required_ms)
+        {
+            // Released before 2s -> un-latch power and shut down
+            digitalWrite(POWER_HOLD_PIN, LOW);
+            while (1)
+            {
+                delay(100);
+            }
+        }
+
+        // Confirmed: short beep feedback
+        tone(BUZZ_PIN, 3000, 60);
+        delay(80);
+        noTone(BUZZ_PIN);
+    }
 }
 
 void FactoryTest::_power_off()
