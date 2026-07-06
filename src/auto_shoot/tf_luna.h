@@ -33,30 +33,29 @@ void initTfLuna() {
     tfLunaState.lastUpdateTime = millis();
 }
 
-// ============ RAW READ (I2C) ============
-// Reads the 9-byte data frame, validates 0x59 0x59 header,
-// converts + normalizes distance (0mm or >8000mm -> 8.0m).
+// ============ RAW READ (I2C register mode) ============
+// TF-Luna I2C returns raw registers (NO 0x59 header):
+//   0x00 DIST_LOW  0x01 DIST_HIGH  0x02 AMP_LOW  0x03 AMP_HIGH
+// Reads 6 bytes from 0x00, converts + normalizes (0mm or >8000mm -> 8.0m).
 bool readTfLunaRaw(float &distance_m, uint16_t &strength) {
 
-    uint8_t buf[9];
+    uint8_t buf[6];
 
     Wire1.beginTransmission(TFLUNA_I2C_ADDR);
-    Wire1.write((uint8_t)0x00);
+    Wire1.write((uint8_t)0x00);              // start at DIST_LOW register
     if (Wire1.endTransmission() != 0) {
-        return false;
+        return false;                        // no ACK from sensor
     }
 
-    Wire1.requestFrom((int)TFLUNA_I2C_ADDR, 9);
+    Wire1.requestFrom((int)TFLUNA_I2C_ADDR, 6);
     int i = 0;
-    while (Wire1.available() && i < 9) {
+    while (Wire1.available() && i < 6) {
         buf[i++] = Wire1.read();
     }
+    if (i != 6) return false;
 
-    if (i != 9) return false;
-    if (buf[0] != 0x59 || buf[1] != 0x59) return false;
-
-    uint16_t dist_mm = buf[2] + (buf[3] << 8);
-    strength = buf[4] + (buf[5] << 8);
+    uint16_t dist_mm = buf[0] | (buf[1] << 8);   // distance (mm)
+    strength         = buf[2] | (buf[3] << 8);   // signal amplitude
 
     // ---- NORMALIZE ----
     if (dist_mm == 0) {
