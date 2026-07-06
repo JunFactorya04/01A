@@ -92,7 +92,7 @@ void renderTimelapseUI() {
 void renderTimelapseHeader() {
     _ft->_canvas->setFont(&fonts::efontCN_16);
     _ft->_canvas->setTextDatum(top_center);
-    _ft->_canvas->setTextColor(COLOR_BLUE);
+    _ft->_canvas->setTextColor(COLOR_GREEN);
     _ft->_canvas->drawString("TIMELAPSE", SCREEN_WIDTH / 2, 2);
     
     // Back button
@@ -105,66 +105,76 @@ void renderTimelapseHeader() {
 void renderTimelapseSettingsPanel() {
     // Panel border
     _ft->_canvas->drawRoundRect(8, 16, 224, 68, 5, COLOR_BORDER);
-    
+
     _ft->_canvas->setFont(&fonts::efontCN_12);
     _ft->_canvas->setTextDatum(top_left);
-    
-    // Item 0: Interval
+
+    // Item 0: Interval (editable)
     renderTimelapseSettingsItem(0, "Interval", timelapse.config.intervalMs, "");
-    
-    // Item 1: Total Shots
+
+    // Item 1: Total Shots (editable)
     renderTimelapseSettingsItem(1, "Total", (float)timelapse.config.totalShots, "");
-    
-    // Item 2: Enable
-    renderTimelapseSettingsItem(2, "Enable", timelapse.config.enable ? 1.0f : 0.0f, "");
+
+    // Row 2: Duration (read-only, computed from interval x total)
+    int y = ITEM_Y_START + (2 * ITEM_HEIGHT);
+    _ft->_canvas->setTextDatum(top_left);
+    _ft->_canvas->setTextColor(COLOR_TEXT);
+    _ft->_canvas->drawString("Duration", ITEM_INDENT + 6, y + 2);
+
+    char durBuf[24];
+    long sec = timelapse.getEstimatedDurationSec();
+    if (sec < 0) {
+        snprintf(durBuf, sizeof(durBuf), "INF");
+    } else {
+        int mm = (int)(sec / 60);
+        int ss = (int)(sec % 60);
+        if (mm > 0) snprintf(durBuf, sizeof(durBuf), "%dm%02ds", mm, ss);
+        else        snprintf(durBuf, sizeof(durBuf), "%ds", ss);
+    }
+    _ft->_canvas->setTextDatum(top_right);
+    _ft->_canvas->setTextColor(COLOR_YELLOW);
+    _ft->_canvas->drawString(durBuf, 225, y + 2);
+    _ft->_canvas->setTextDatum(top_left);
 }
 
 void renderTimelapseSettingsItem(uint8_t index, const char* label, float value, const char* unit) {
     int y = ITEM_Y_START + (index * ITEM_HEIGHT);
     bool isSelected = (timelapse.editMode.selectedIndex == index);
     bool isEditing = (timelapse.editMode.state == TimelapseEditMode::EDITING && isSelected);
-    
-    // Background highlight
+
+    // Background highlight (AUTO SHOOT style: editing=highlight, selected=border)
     if (isSelected) {
-        _ft->_canvas->fillRoundRect(10, y - 1, 220, 18, 3, 
+        _ft->_canvas->fillRoundRect(10, y - 1, 220, 18, 3,
                                    isEditing ? COLOR_HIGHLIGHT : COLOR_BORDER);
     }
-    
-    // Text color
-    uint16_t textColor = isSelected ? COLOR_BG : COLOR_TEXT;
-    _ft->_canvas->setTextColor(textColor);
-    
+
     // Label
+    _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_TEXT);
+    _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->drawString(label, ITEM_INDENT + 6, y + 2);
-    
-    // Value
-    _ft->_canvas->setTextDatum(top_right);
+
+    // Value string
     char valueStr[32];
-    
-    if (index == 0) {  // Interval
+    if (index == 0) {                       // Interval
         snprintf(valueStr, sizeof(valueStr), "%s", formatInterval((int)value));
-    } else if (index == 1) {  // Total Shots
-        if ((int)value == 0) {
-            snprintf(valueStr, sizeof(valueStr), "INF");
-        } else {
-            snprintf(valueStr, sizeof(valueStr), "%d", (int)value);
-        }
-    } else if (index == 2) {  // Enable
-        snprintf(valueStr, sizeof(valueStr), "%s", (int)value ? "ON" : "OFF");
+    } else {                                // Total Shots
+        if ((int)value == 0) snprintf(valueStr, sizeof(valueStr), "INF");
+        else                 snprintf(valueStr, sizeof(valueStr), "%d", (int)value);
     }
-    
-    // Blinking effect when editing
-    if (isEditing && timelapseBlinkState && index != 2) {
-        _ft->_canvas->setTextColor(COLOR_BG);
-    }
-    
-    _ft->_canvas->drawString(valueStr, 210, y + 2);
-    
-    // Arrow indicator
+
+    // Value color (green like AUTO SHOOT; black when selected; blink when editing)
     _ft->_canvas->setTextDatum(top_right);
-    _ft->_canvas->setTextColor(COLOR_BLUE);
+    if (isEditing && timelapseBlinkState) {
+        _ft->_canvas->setTextColor(COLOR_BG);
+    } else {
+        _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_GREEN);
+    }
+    _ft->_canvas->drawString(valueStr, 210, y + 2);
+
+    // Arrow indicator (green, AUTO SHOOT style)
+    _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_GREEN);
     _ft->_canvas->drawString(">", 225, y + 2);
-    
+
     _ft->_canvas->setTextDatum(top_left);
 }
 
@@ -194,7 +204,11 @@ void renderTimelapseStatusPanel() {
     if (strcmp(status, "IDLE") == 0) {
         statusColor = COLOR_TEXT;
     } else if (strcmp(status, "RUNNING") == 0) {
+        statusColor = COLOR_GREEN;
+    } else if (strcmp(status, "PAUSED") == 0) {
         statusColor = COLOR_YELLOW;
+    } else if (strcmp(status, "DONE") == 0) {
+        statusColor = COLOR_GREEN;
     }
     _ft->_canvas->setTextColor(statusColor);
     _ft->_canvas->drawString(status, 230, y + 4);
@@ -218,26 +232,25 @@ void renderTimelapseStatusPanel() {
     _ft->_canvas->setTextDatum(top_left);
 }
 
-// ============ CONTROL BUTTONS ============
+// ============ CONTROL BUTTON (START / PAUSE / RESUME) ============
 void renderTimelapseControlButtons() {
-    // START/STOP visual indicators (Enable toggle is via index 2 in settings)
     int btnY = 117;
-    int btnHeight = 14;
-    
-    _ft->_canvas->drawRoundRect(12, btnY, 100, btnHeight, 3, 
-                               timelapse.isRunning() ? COLOR_GREEN : COLOR_BORDER);
-    
+    bool isSel = (timelapse.editMode.selectedIndex == 2);
+
+    const char* label = timelapse.getControlLabel();          // START / PAUSE / RESUME
+    uint16_t accent = timelapse.isRunning() ? COLOR_RED : COLOR_GREEN;
+
+    if (isSel) {
+        _ft->_canvas->fillRoundRect(60, btnY, 120, 14, 3, COLOR_HIGHLIGHT);
+    } else {
+        _ft->_canvas->drawRoundRect(60, btnY, 120, 14, 3, accent);
+    }
+
     _ft->_canvas->setFont(&fonts::efontCN_10);
     _ft->_canvas->setTextDatum(top_center);
-    _ft->_canvas->setTextColor(timelapse.isRunning() ? COLOR_BG : COLOR_GREEN);
-    _ft->_canvas->drawString("START", 62, btnY + 2);
-    
-    // STOP button (right)
-    _ft->_canvas->drawRoundRect(128, btnY, 100, btnHeight, 3, 
-                               timelapse.isRunning() ? COLOR_RED : COLOR_BORDER);
-    
-    _ft->_canvas->setTextColor(timelapse.isRunning() ? COLOR_RED : COLOR_TEXT);
-    _ft->_canvas->drawString("STOP", 178, btnY + 2);
+    _ft->_canvas->setTextColor(isSel ? COLOR_BG : accent);
+    _ft->_canvas->drawString(label, 120, btnY + 2);
+    _ft->_canvas->setTextDatum(top_left);
 }
 
 // ============ INTERACTION HANDLER ============

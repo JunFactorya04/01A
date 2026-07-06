@@ -19,6 +19,7 @@ struct TimelapseState {
     unsigned long lastShotTime = 0;
     int shotCount = 0;
     bool isRunning = false;
+    bool isPaused = false;   // paused mid-sequence (progress preserved)
 };
 
 // ============ EDIT MODE ============
@@ -29,7 +30,7 @@ struct TimelapseEditMode {
         EDITING = 2
     } state = IDLE;
     
-    uint8_t selectedIndex = 0;  // 0: interval, 1: totalShots, 2: enable
+    uint8_t selectedIndex = 0;  // 0: interval, 1: totalShots, 2: START/PAUSE control
     unsigned long enterTime = 0;
 };
 
@@ -52,9 +53,11 @@ public:
     void update();
     
     // ===== Control =====
-    void start();
-    void stop();
-    void toggleEnable();
+    void start();          // fresh start (resets shot count)
+    void stop();           // stop + reset run state
+    void pause();          // pause, keep progress
+    void resume();         // resume from pause
+    void toggleRunPause(); // START -> PAUSE -> RESUME toggle
     
     // ===== Camera Trigger =====
     void triggerCamera();
@@ -68,10 +71,13 @@ public:
     const char* getSelectedItemName();
     int getSelectedValue();
     const char* getStatusString();
+    const char* getControlLabel() const;   // START / PAUSE / RESUME
+    long getEstimatedDurationSec() const;  // total time to finish; -1 = infinite
     int getShotCount() const;
     int getRemainingShots() const;
     unsigned long getTimeUntilNextShot() const;
     bool isRunning() const;
+    bool isPaused() const;
     bool isEnabled() const;
     
 private:

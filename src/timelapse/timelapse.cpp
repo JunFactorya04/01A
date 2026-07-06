@@ -31,10 +31,12 @@ void Timelapse::init() {
     // Validate config
     validateConfig();
     
-    // Initialize state
-    state.isRunning = false;
-    state.lastShotTime = millis();  // prevent immediate trigger if enable=true on load
-    state.shotCount = 0;
+    // Initialize state — always start idle (never auto-run on entering mode)
+    config.enable      = false;
+    state.isRunning    = false;
+    state.isPaused     = false;
+    state.lastShotTime = millis();
+    state.shotCount    = 0;
 }
 
 // ============ CONFIG MANAGEMENT ============
@@ -74,18 +76,18 @@ void Timelapse::validateConfig() {
 
 // ============ MAIN UPDATE ============
 void Timelapse::update() {
-    if (!config.enable) return;
+    if (!state.isRunning) return;
     
     unsigned long now = millis();
     
     // Interval check
-    if (now - state.lastShotTime >= config.intervalMs) {
+    if (now - state.lastShotTime >= (unsigned long)config.intervalMs) {
         
-        // Check max shots
+        // Sequence complete?
         if (config.totalShots != 0 && state.shotCount >= config.totalShots) {
-            config.enable = false;
             state.isRunning = false;
-            saveConfig();
+            state.isPaused  = false;   // finished (DONE) — keep shotCount for display
+            config.enable   = false;
             return;
         }
         
@@ -95,8 +97,6 @@ void Timelapse::update() {
         state.lastShotTime = now;
         state.shotCount++;
     }
-    
-    state.isRunning = config.enable;
 }
 
 // ============ CAMERA TRIGGER ============
@@ -121,33 +121,47 @@ void Timelapse::triggerCamera() {
 
 // ============ CONTROL ============
 void Timelapse::start() {
-    config.enable = true;
-    state.isRunning = true;
+    config.enable      = true;
+    state.isRunning    = true;
+    state.isPaused     = false;
     state.lastShotTime = millis();
-    state.shotCount = 0;
-    saveConfig();
+    state.shotCount    = 0;
 }
 
 void Timelapse::stop() {
-    config.enable = false;
+    config.enable   = false;
     state.isRunning = false;
-    saveConfig();
+    state.isPaused  = false;
 }
 
-void Timelapse::toggleEnable() {
-    config.enable = !config.enable;
-    if (config.enable) {
-        state.lastShotTime = millis();
-        state.shotCount = 0;
+void Timelapse::pause() {
+    // Pause but preserve progress (shotCount, so shooting can resume)
+    config.enable   = false;
+    state.isRunning = false;
+    state.isPaused  = true;
+}
+
+void Timelapse::resume() {
+    config.enable      = true;
+    state.isRunning    = true;
+    state.isPaused     = false;
+    state.lastShotTime = millis();   // wait a full interval before next shot
+}
+
+void Timelapse::toggleRunPause() {
+    if (state.isRunning) {
+        pause();                     // running -> paused
+    } else if (state.isPaused) {
+        resume();                    // paused  -> running
+    } else {
+        start();                     // idle/done -> fresh start
     }
-    state.isRunning = config.enable;
-    saveConfig();
 }
 
 // ============ UI INTERACTION ============
 void Timelapse::handleEncoderRotate(int delta) {
     if (editMode.state == TimelapseEditMode::SELECTING) {
-        // Navigate between items (0-2)
+        // Navigate: 0=Interval, 1=Total, 2=START/PAUSE control
         int newIndex = editMode.selectedIndex + (delta > 0 ? 1 : -1);
         if (newIndex >= 0 && newIndex <= 2) {
             editMode.selectedIndex = newIndex;
@@ -165,8 +179,6 @@ void Timelapse::handleEncoderRotate(int delta) {
             case 1:  // Total Shots
                 config.totalShots += delta;
                 break;
-            case 2:  // Enable toggle (handled by button press)
-                break;
         }
         
         validateConfig();
@@ -175,12 +187,11 @@ void Timelapse::handleEncoderRotate(int delta) {
 
 void Timelapse::handleButtonPress() {
     if (editMode.state == TimelapseEditMode::SELECTING) {
-        // Enter edit mode for selected item
         if (editMode.selectedIndex == 2) {
-            // Enable toggle - immediate action
-            toggleEnable();
+            // START / PAUSE / RESUME toggle
+            toggleRunPause();
         } else {
-            // Enter edit mode
+            // Enter edit mode for Interval / Total
             editMode.state = TimelapseEditMode::EDITING;
             editMode.enterTime = millis();
         }
@@ -193,10 +204,11 @@ void Timelapse::handleButtonPress() {
 }
 
 void Timelapse::handleButtonLongPress() {
-    // Long press: exit back to menu
+    // Long press: stop and exit back to menu
+    stop();
+    saveConfig();
     editMode.state = TimelapseEditMode::IDLE;
     editMode.selectedIndex = 0;
-    stop();
 }
 
 // ============ GETTERS ============
@@ -204,7 +216,7 @@ const char* Timelapse::getSelectedItemName() {
     switch (editMode.selectedIndex) {
         case 0: return "Interval";
         case 1: return "Total Shots";
-        case 2: return "Enable";
+        case 2: return "Control";
         default: return "Unknown";
     }
 }
@@ -213,15 +225,30 @@ int Timelapse::getSelectedValue() {
     switch (editMode.selectedIndex) {
         case 0: return config.intervalMs;
         case 1: return config.totalShots;
-        case 2: return config.enable ? 1 : 0;
         default: return 0;
     }
 }
 
 const char* Timelapse::getStatusString() {
-    if (!config.enable) return "IDLE";
     if (state.isRunning) return "RUNNING";
-    return "STOPPED";
+    if (state.isPaused)  return "PAUSED";
+    if (config.totalShots != 0 && state.shotCount >= config.totalShots && state.shotCount > 0)
+        return "DONE";
+    return "IDLE";
+}
+
+const char* Timelapse::getControlLabel() const {
+    if (state.isRunning) return "PAUSE";
+    if (state.isPaused)  return "RESUME";
+    return "START";
+}
+
+// Total time to finish the whole sequence (seconds). -1 = infinite (totalShots=0).
+long Timelapse::getEstimatedDurationSec() const {
+    if (config.totalShots <= 0) return -1;
+    // total = intervals between shots * interval
+    long sec = (long)((long long)config.totalShots * config.intervalMs / 1000);
+    return sec;
 }
 
 int Timelapse::getShotCount() const {
@@ -242,6 +269,10 @@ unsigned long Timelapse::getTimeUntilNextShot() const {
 
 bool Timelapse::isRunning() const {
     return state.isRunning;
+}
+
+bool Timelapse::isPaused() const {
+    return state.isPaused;
 }
 
 bool Timelapse::isEnabled() const {
