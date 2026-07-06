@@ -6,6 +6,7 @@
 
 #include "timelapse.h"
 #include "../factory_test/factory_test.h"
+#include "../sleep_week/sleep_week_ui.h"
 #include <smooth_ui_toolkit.h>
 
 extern FactoryTest* _ft;
@@ -83,6 +84,9 @@ void renderTimelapseUI() {
     
     // Buttons
     renderTimelapseControlButtons();
+    
+    // Scheduler countdown popup
+    if (schedulerPopupActive()) schedulerPopupDraw();
     
     // Push to display
     _ft->_canvas_update();

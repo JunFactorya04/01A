@@ -9,6 +9,8 @@
  *
  */
 #include "../factory_test/factory_test.h"
+#include "../sleep_week/sleep_week_scheduler.h"
+#include "../sleep_week/sleep_week_ui.h"
 #include "assets/assets.h"
 #include <Arduino.h>
 #include <smooth_ui_toolkit.h>
@@ -170,6 +172,9 @@ class LauncherMenu : public SmoothOptions
             }
         }
 
+        // Scheduler countdown popup (shows on main menu too)
+        if (schedulerPopupActive()) schedulerPopupDraw();
+
         // Push
         _ft->_canvas_update();
     }
@@ -274,6 +279,9 @@ void view_create(FactoryTest* ft)
 
 void view_update()
 {
+    // Global scheduler tick — keeps SLEEP&WEEK evaluating while at main menu
+    sleepWeekScheduler.update();
+
     _launcher_menu->update(millis());
     _batv_panel_transition->update(millis());
 

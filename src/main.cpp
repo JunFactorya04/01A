@@ -20,6 +20,10 @@ void setup()
 {
     ft.init();
     view_create(&ft);
+
+    // If we booted from an RTC scheduled wake inside the awake window,
+    // auto-enter the configured capture mode (AUTO SHOOT / TIMELAPSE).
+    ft._scheduler_boot_resume();
 }
 
 void loop() { view_update(); }

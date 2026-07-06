@@ -10,6 +10,8 @@
  */
 #include "factory_test.h"
 #include "../setting/setting.h"
+#include "../sleep_week/sleep_week_scheduler.h"
+#include <sys/time.h>
 
 void FactoryTest::init()
 {
@@ -29,6 +31,37 @@ void FactoryTest::init()
     // Load persisted settings (speaker on/off, etc.)
     setting.loadConfig();
     g_speakerEnabled = setting.config.speakerEnabled;
+
+    // Sync ESP32 system time from BM8563 RTC so the clock, SLEEP&WEEK scheduler
+    // and countdown popup work globally from boot.
+    {
+        I2C_BM8563_TimeTypeDef rt;
+        I2C_BM8563_DateTypeDef rd;
+        _rtc.getTime(&rt);
+        _rtc.getDate(&rd);
+
+        struct tm ti = {};
+        ti.tm_year  = rd.year - 1900;
+        ti.tm_mon   = rd.month - 1;
+        ti.tm_mday  = rd.date;
+        ti.tm_wday  = rd.weekDay;
+        ti.tm_hour  = rt.hours;
+        ti.tm_min   = rt.minutes;
+        ti.tm_sec   = rt.seconds;
+        ti.tm_isdst = -1;
+
+        time_t t = mktime(&ti);
+        if (t > 0) {
+            struct timeval tv = { t, 0 };
+            settimeofday(&tv, nullptr);
+        }
+    }
+
+    // Load scheduler config so it runs globally (high-privilege persistence)
+    sleepWeekScheduler.loadConfig();
+
+    // Register RTC alarm + power-sleep callbacks (needed for global operation)
+    _scheduler_register_callbacks();
 
     // if (_check_test_mode())
     // {

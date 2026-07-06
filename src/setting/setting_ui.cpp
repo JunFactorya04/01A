@@ -6,6 +6,7 @@
 
 #include "setting.h"
 #include "../factory_test/factory_test.h"
+#include "../sleep_week/sleep_week_ui.h"
 #include <smooth_ui_toolkit.h>
 #include <time.h>
 
@@ -114,6 +115,8 @@ void renderSettingUI() {
         renderSettingHeader();
         renderSettingItems();
     }
+
+    if (schedulerPopupActive()) schedulerPopupDraw();
 
     _ft->_canvas_update();
 }

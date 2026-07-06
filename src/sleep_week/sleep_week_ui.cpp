@@ -5,8 +5,10 @@
  */
 
 #include "sleep_week_scheduler.h"
+#include "sleep_week_ui.h"
 #include "../factory_test/factory_test.h"
 #include <smooth_ui_toolkit.h>
+#include <time.h>
 
 extern FactoryTest* _ft;
 
@@ -59,6 +61,9 @@ void renderSleepWeekUI() {
     // Status
     renderStatus();
     
+    // Scheduler countdown popup (if within 5s of an event)
+    if (schedulerPopupActive()) schedulerPopupDraw();
+    
     // Push to display
     _ft->_canvas_update();
 }
@@ -67,13 +72,30 @@ void renderSleepWeekUI() {
 void renderSleepWeekHeader() {
     _ft->_canvas->setFont(&fonts::efontCN_16);
     _ft->_canvas->setTextDatum(top_center);
-    _ft->_canvas->setTextColor(COLOR_BLUE);
+    _ft->_canvas->setTextColor(COLOR_GREEN);
     _ft->_canvas->drawString("SLEEP & WEEK", SCREEN_WIDTH / 2, 2);
     
     // Back button
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(COLOR_TEXT);
     _ft->_canvas->drawString("<", 5, 2);
+
+    // Real-time clock (HH:MM) + date (DD/MM) top-right
+    time_t now = time(nullptr);
+    struct tm* lt = (now > 0) ? localtime(&now) : nullptr;
+    if (lt) {
+        char hm[8];
+        char dt[8];
+        snprintf(hm, sizeof(hm), "%02d:%02d", lt->tm_hour, lt->tm_min);
+        snprintf(dt, sizeof(dt), "%02d/%02d", lt->tm_mday, lt->tm_mon + 1);
+        _ft->_canvas->setFont(&fonts::efontCN_10);
+        _ft->_canvas->setTextDatum(top_right);
+        _ft->_canvas->setTextColor(COLOR_GREEN);
+        _ft->_canvas->drawString(hm, 236, 1);
+        _ft->_canvas->setTextColor(COLOR_TEXT);
+        _ft->_canvas->drawString(dt, 236, 12);
+        _ft->_canvas->setTextDatum(top_left);
+    }
 }
 
 // ============ DAYS ============
@@ -164,7 +186,7 @@ void renderModeSelection() {
     _ft->_canvas->setTextColor((modeSel || modeEdit) ? COLOR_BG : COLOR_TEXT);
     _ft->_canvas->drawString("Mode:", 10, y);
 
-    _ft->_canvas->setTextColor((modeSel || modeEdit) ? COLOR_BG : COLOR_BLUE);
+    _ft->_canvas->setTextColor((modeSel || modeEdit) ? COLOR_BG : COLOR_GREEN);
     _ft->_canvas->drawString(sleepWeekScheduler.getModeString(), 60, y);
 }
 
@@ -200,4 +222,36 @@ void renderStatus() {
 void initSleepWeekUI() {
     sleepWeekScheduler.editMode.state = SleepWeekEditMode::SELECTING_DAY;
     sleepWeekScheduler.editMode.selectedIndex = 0;
+}
+
+// ============ GLOBAL SCHEDULER COUNTDOWN OVERLAY ============
+bool schedulerPopupActive() {
+    int s; const char* l;
+    return sleepWeekScheduler.getCountdown(s, l);
+}
+
+void schedulerPopupDraw() {
+    if (!_ft || !_ft->_canvas) return;
+    int secs; const char* label;
+    if (!sleepWeekScheduler.getCountdown(secs, label)) return;
+
+    // Centered red popup box
+    const int w = 170, h = 60;
+    const int x = (SCREEN_WIDTH - w) / 2;
+    const int y = (SCREEN_HEIGHT - h) / 2;
+
+    _ft->_canvas->fillRoundRect(x, y, w, h, 8, COLOR_RED);
+    _ft->_canvas->drawRoundRect(x, y, w, h, 8, COLOR_TEXT);
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%s in %ds", label, secs);
+
+    _ft->_canvas->setTextDatum(top_center);
+    _ft->_canvas->setTextColor(COLOR_TEXT);
+    _ft->_canvas->setFont(&fonts::efontCN_24);
+    _ft->_canvas->drawString(buf, SCREEN_WIDTH / 2, y + 10);
+
+    _ft->_canvas->setFont(&fonts::efontCN_12);
+    _ft->_canvas->drawString("Scheduler event", SCREEN_WIDTH / 2, y + 40);
+    _ft->_canvas->setTextDatum(top_left);
 }

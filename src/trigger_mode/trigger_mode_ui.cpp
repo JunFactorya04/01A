@@ -6,6 +6,7 @@
 
 #include "trigger_mode.h"
 #include "../factory_test/factory_test.h"
+#include "../sleep_week/sleep_week_ui.h"
 #include <smooth_ui_toolkit.h>
 
 extern FactoryTest* _ft;
@@ -53,6 +54,9 @@ void renderTriggerModeUI() {
     
     // Test button
     renderTestButton();
+    
+    // Scheduler countdown popup
+    if (schedulerPopupActive()) schedulerPopupDraw();
     
     // Push to display
     _ft->_canvas_update();

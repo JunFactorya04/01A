@@ -33,6 +33,7 @@ SleepWeekScheduler sleepWeekScheduler;
 
 // Static callback for RTC alarm
 void (*SleepWeekScheduler::s_alarmCb)(uint8_t, uint8_t) = nullptr;
+void (*SleepWeekScheduler::s_sleepCb)() = nullptr;
 
 // ============ CONSTRUCTOR ============
 SleepWeekScheduler::SleepWeekScheduler() {
@@ -244,12 +245,18 @@ bool SleepWeekScheduler::shouldWakeNow() {
 void SleepWeekScheduler::enterSleepMode() {
     state.isSleeping = true;
     
-    // Set RTC alarm for wake time
+    // Set RTC alarm for wake time (hardware wake source)
     setRTCAlarm(config.timeConfig.wakeHour, config.timeConfig.wakeMinute);
     
     // Stop active capture modes while scheduler is sleeping.
     autoShoot.stop();
     timelapse.stop();
+
+    // Actually power off the device (real power sleep). RTC alarm will boot it
+    // back at wake time. This does not return.
+    if (s_sleepCb) {
+        s_sleepCb();
+    }
 }
 
 void SleepWeekScheduler::wakeUp() {
@@ -344,10 +351,76 @@ void SleepWeekScheduler::handleButtonPress() {
 }
 
 void SleepWeekScheduler::handleButtonLongPress() {
-    // Disable scheduler
-    enableScheduler(false);
+    // Exit only — keep scheduler settings (high-privilege persistence).
+    // Do NOT disable: the scheduler must keep running after leaving the mode.
+    saveConfig();
     editMode.state = SleepWeekEditMode::IDLE;
     editMode.selectedIndex = 0;
+}
+
+// Returns true if within 1..5s of an upcoming SLEEP (enabled day) or WAKE event.
+bool SleepWeekScheduler::getCountdown(int& secsLeft, const char*& label) {
+    if (!config.schedulerEnabled) return false;
+
+    struct tm t;
+    if (!getLocalTimeSafe(t)) return false;
+
+    int nowSec = t.tm_hour * 3600 + t.tm_min * 60 + t.tm_sec;
+
+    // SLEEP event — only if today is enabled
+    bool dayEnabled = false;
+    switch (t.tm_wday) {
+        case 0: dayEnabled = config.weeklyEnable.sunday; break;
+        case 1: dayEnabled = config.weeklyEnable.monday; break;
+        case 2: dayEnabled = config.weeklyEnable.tuesday; break;
+        case 3: dayEnabled = config.weeklyEnable.wednesday; break;
+        case 4: dayEnabled = config.weeklyEnable.thursday; break;
+        case 5: dayEnabled = config.weeklyEnable.friday; break;
+        case 6: dayEnabled = config.weeklyEnable.saturday; break;
+    }
+    if (dayEnabled) {
+        int tgt = config.timeConfig.sleepHour * 3600 + config.timeConfig.sleepMinute * 60;
+        int diff = tgt - nowSec;
+        if (diff >= 1 && diff <= 5) { secsLeft = diff; label = "SLEEP"; return true; }
+    }
+
+    // WAKE event
+    {
+        int tgt = config.timeConfig.wakeHour * 3600 + config.timeConfig.wakeMinute * 60;
+        int diff = tgt - nowSec;
+        if (diff >= 1 && diff <= 5) { secsLeft = diff; label = "WAKE"; return true; }
+    }
+
+    return false;
+}
+
+// True if scheduler enabled and now is within today's awake window [wake, sleep).
+bool SleepWeekScheduler::shouldBeAwakeNow() {
+    if (!config.schedulerEnabled) return false;
+
+    struct tm t;
+    if (!getLocalTimeSafe(t)) return false;
+
+    // Today must be an enabled day
+    bool dayEnabled = false;
+    switch (t.tm_wday) {
+        case 0: dayEnabled = config.weeklyEnable.sunday; break;
+        case 1: dayEnabled = config.weeklyEnable.monday; break;
+        case 2: dayEnabled = config.weeklyEnable.tuesday; break;
+        case 3: dayEnabled = config.weeklyEnable.wednesday; break;
+        case 4: dayEnabled = config.weeklyEnable.thursday; break;
+        case 5: dayEnabled = config.weeklyEnable.friday; break;
+        case 6: dayEnabled = config.weeklyEnable.saturday; break;
+    }
+    if (!dayEnabled) return false;
+
+    int now   = t.tm_hour * 60 + t.tm_min;
+    int wake  = config.timeConfig.wakeHour  * 60 + config.timeConfig.wakeMinute;
+    int sleep = config.timeConfig.sleepHour * 60 + config.timeConfig.sleepMinute;
+
+    if (wake == sleep) return false;
+    if (wake < sleep)  return (now >= wake && now < sleep);      // same-day window
+    return (now >= wake || now < sleep);                          // spans midnight
 }
 
 // ============ GETTERS ============

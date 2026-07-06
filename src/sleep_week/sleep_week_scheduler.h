@@ -78,6 +78,10 @@ public:
     static void setAlarmCallback(void (*cb)(uint8_t hour, uint8_t minute)) {
         s_alarmCb = cb;
     }
+    // ===== Power-sleep callback (actual hardware power off) =====
+    static void setSleepCallback(void (*cb)()) {
+        s_sleepCb = cb;
+    }
 
     // ===== Initialization =====
     void init();
@@ -111,12 +115,22 @@ public:
     const char* getModeString() const;
     bool isSchedulerEnabled() const;
     bool isSleeping() const;
+
+    // Countdown to next scheduled event (SLEEP/WAKE) within 5s.
+    // Returns true and fills secsLeft (1-5) + label if a popup should show.
+    bool getCountdown(int& secsLeft, const char*& label);
+
+    // True if scheduler enabled and current time is inside today's awake window
+    // [wake, sleep). Used for boot auto-resume into the configured mode.
+    bool shouldBeAwakeNow();
+    SchedulerMode getMode() const { return config.mode; }
     
 private:
     void validateConfig();
     uint8_t getCurrentDayOfWeek();
     void setRTCAlarm(uint8_t hour, uint8_t minute);
     static void (*s_alarmCb)(uint8_t, uint8_t);
+    static void (*s_sleepCb)();
 };
 
 // Global instance

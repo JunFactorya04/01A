@@ -152,6 +152,7 @@ public:
     void handleSleepWeekInput();
     void handleSleepWeekButtonShortPress();
     void handleSleepWeekButtonLongPress();
+    void _scheduler_register_callbacks();
     int _sleep_week_enc_last_pos = 0;
     bool _mode_btn_pressed = false;
     unsigned long _mode_btn_press_start = 0;
@@ -184,4 +185,5 @@ public:
 
     void init();
     void start_factory_test();
+    void _scheduler_boot_resume();   // auto-enter scheduled mode after RTC wake
 };

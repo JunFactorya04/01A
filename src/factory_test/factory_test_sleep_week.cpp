@@ -24,6 +24,38 @@ static void _rtcAlarmSetter(uint8_t hour, uint8_t minute) {
     _ft->_rtc.SetAlarmIRQ(t);
 }
 
+// ============ POWER-SLEEP CALLBACK ============
+// Called by SleepWeekScheduler::enterSleepMode() to actually power off.
+// The RTC wake alarm has already been set; it will boot the device at wake time.
+static void _schedulerPowerSleep() {
+    if (!_ft) return;
+    if (_ft->_canvas) {
+        _ft->_canvas->fillScreen(0x0000);
+        _ft->_canvas_update();
+    }
+    delay(200);
+    digitalWrite(POWER_HOLD_PIN, LOW);   // release soft-power latch -> power off
+    while (1) { delay(1000); }           // halt (USB-powered fallback)
+}
+
+// ============ REGISTER SCHEDULER CALLBACKS (called at boot) ============
+void FactoryTest::_scheduler_register_callbacks() {
+    SleepWeekScheduler::setAlarmCallback(_rtcAlarmSetter);
+    SleepWeekScheduler::setSleepCallback(_schedulerPowerSleep);
+}
+
+// ============ BOOT AUTO-RESUME ============
+// If the scheduler is enabled and we are inside today's awake window,
+// automatically enter the configured capture mode after an RTC wake.
+void FactoryTest::_scheduler_boot_resume() {
+    if (!sleepWeekScheduler.shouldBeAwakeNow()) return;
+    switch (sleepWeekScheduler.getMode()) {
+        case MODE_AUTO_SHOOT: _auto_shoot_test(); break;
+        case MODE_TIMELAPSE:  _timelapse_test();  break;
+        default: break;
+    }
+}
+
 // ============ SLEEP WEEK TEST ============
 void FactoryTest::_sleep_week_test() {
 
@@ -53,8 +85,8 @@ void FactoryTest::_sleep_week_test() {
         }
     }
 
-    // Register RTC alarm callback (used by setRTCAlarm when entering sleep)
-    SleepWeekScheduler::setAlarmCallback(_rtcAlarmSetter);
+    // Register RTC alarm + power-sleep callbacks
+    _scheduler_register_callbacks();
 
     // Initialize Sleep Week Scheduler
     sleepWeekScheduler.init();
@@ -67,7 +99,8 @@ void FactoryTest::_sleep_week_test() {
         _sleep_week_loop();
         
         if (_mode_exit_requested) {
-            sleepWeekScheduler.enableScheduler(false);
+            // Persist settings; keep scheduler enabled so it runs from main / after sleep
+            sleepWeekScheduler.saveConfig();
             autoShoot.stop();   // stop any capture mode started by wakeUp()
             timelapse.stop();
             break;
