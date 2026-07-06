@@ -112,6 +112,7 @@ void Timelapse::triggerCamera() {
 
     if (fireG2) digitalWrite(TRIGGER_G2_PIN, HIGH);
     if (fireG1) digitalWrite(TRIGGER_G1_PIN, HIGH);
+    if (triggerMode.config.beepEnabled && g_speakerEnabled) tone(BUZZ_PIN, 2500, 30);   // shot feedback
     delay(30);
     if (fireG2) digitalWrite(TRIGGER_G2_PIN, LOW);
     if (fireG1) digitalWrite(TRIGGER_G1_PIN, LOW);

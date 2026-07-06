@@ -66,7 +66,7 @@ void renderTriggerModeUI() {
 void renderTriggerHeader() {
     _ft->_canvas->setFont(&fonts::efontCN_16);
     _ft->_canvas->setTextDatum(top_center);
-    _ft->_canvas->setTextColor(COLOR_BLUE);
+    _ft->_canvas->setTextColor(COLOR_GREEN);
     _ft->_canvas->drawString("TRIGGER MODE", SCREEN_WIDTH / 2, 2);
     
     // Back button
@@ -75,73 +75,72 @@ void renderTriggerHeader() {
     _ft->_canvas->drawString("<", 5, 2);
 }
 
-// ============ G1/G2 LABELS ============
+// ============ G1/G2/BEEP LABELS ============
 void renderG1G2Labels() {
     _ft->_canvas->setFont(&fonts::efontCN_12);
     _ft->_canvas->setTextDatum(top_left);
-    
-    // Trigger Label (G2 - main)
-    renderToggleLabel(0, "Trigger", triggerMode.getTriggerEnabled(), ITEM_Y_START);
-    
-    // Remote Label (G1 - backup)
-    renderToggleLabel(1, "Remote", triggerMode.getRemoteEnabled(), ITEM_Y_START + ITEM_HEIGHT + 8);
+
+    // 3 compact toggle rows
+    renderToggleLabel(0, "Trigger", triggerMode.getTriggerEnabled(), 20);
+    renderToggleLabel(1, "Remote",  triggerMode.getRemoteEnabled(),  42);
+    renderToggleLabel(2, "Beep",    triggerMode.getBeepEnabled(),    64);
 }
 
 void renderToggleLabel(uint8_t index, const char* label, bool enabled, int y) {
     bool isSelected = (triggerMode.editMode.selectedIndex == index);
-    
-    // Background highlight — match AUTO SHOOT (COLOR_BORDER when selected)
+
+    // Background highlight — AUTO SHOOT style (COLOR_BORDER when selected)
     if (isSelected) {
-        _ft->_canvas->fillRoundRect(10, y - 3, 220, 26, 5, COLOR_BORDER);
+        _ft->_canvas->fillRoundRect(10, y - 2, 222, 20, 4, COLOR_BORDER);
     }
-    
-    // Label text — selected: black on border, else white (AUTO SHOOT style)
+
+    // Label
     _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_TEXT);
     _ft->_canvas->setTextDatum(top_left);
-    _ft->_canvas->drawString(label, ITEM_INDENT, y + 6);
-    
-    // ON/OFF indicator — green/red like AUTO SHOOT speaker/status
+    _ft->_canvas->drawString(label, ITEM_INDENT, y + 3);
+
+    // ON/OFF indicator — green/red
     _ft->_canvas->setTextDatum(top_right);
     _ft->_canvas->setTextColor(enabled ? COLOR_GREEN : COLOR_RED);
-    _ft->_canvas->drawString(enabled ? "ON" : "OFF", 220, y + 6);
-    
-    // Arrow indicator
+    _ft->_canvas->drawString(enabled ? "ON" : "OFF", 218, y + 3);
+
+    // Arrow
     _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_GREEN);
-    _ft->_canvas->drawString(">", 235, y + 6);
-    
+    _ft->_canvas->drawString(">", 233, y + 3);
+
     _ft->_canvas->setTextDatum(top_left);
 }
 
 // ============ STATUS PANEL ============
 void renderTriggerStatusPanel() {
-    int y = 88;
+    int y = 90;
     
     // Panel border
-    _ft->_canvas->drawRoundRect(8, y, 224, 20, 5, COLOR_BORDER);
+    _ft->_canvas->drawRoundRect(8, y, 224, 18, 4, COLOR_BORDER);
     
     _ft->_canvas->setFont(&fonts::efontCN_10);
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(COLOR_TEXT);
     
     // Trigger count
-    _ft->_canvas->drawString("Triggers:", 12, y + 5);
+    _ft->_canvas->drawString("Triggers:", 12, y + 4);
     _ft->_canvas->setTextColor(COLOR_GREEN);
     char countStr[16];
     snprintf(countStr, sizeof(countStr), "%d", triggerMode.getTriggerCount());
-    _ft->_canvas->drawString(countStr, 70, y + 5);
+    _ft->_canvas->drawString(countStr, 70, y + 4);
     
     // Status
     _ft->_canvas->setTextDatum(top_right);
     _ft->_canvas->setTextColor(triggerMode.isRunning() ? COLOR_GREEN : COLOR_TEXT);
-    _ft->_canvas->drawString(triggerMode.isRunning() ? "ACTIVE" : "IDLE", 225, y + 5);
+    _ft->_canvas->drawString(triggerMode.isRunning() ? "ACTIVE" : "IDLE", 225, y + 4);
     
     _ft->_canvas->setTextDatum(top_left);
 }
 
 // ============ TEST BUTTON ============
 void renderTestButton() {
-    int y = 115;
-    bool isSelected = (triggerMode.editMode.selectedIndex == 2);
+    int y = 116;
+    bool isSelected = (triggerMode.editMode.selectedIndex == 3);
 
     // Selected: filled highlight (AUTO SHOOT START/STOP style)
     if (isSelected) {

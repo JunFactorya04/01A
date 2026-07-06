@@ -43,6 +43,7 @@ void TriggerMode::loadConfig() {
     
     config.triggerEnabled = prefs.getBool("triggerEnabled", true);   // G2 default ON
     config.remoteEnabled  = prefs.getBool("remoteEnabled",  false);  // G1 default OFF
+    config.beepEnabled    = prefs.getBool("beepEnabled",    true);   // beep default ON
     
     prefs.end();
 }
@@ -53,6 +54,7 @@ void TriggerMode::saveConfig() {
     
     prefs.putBool("triggerEnabled", config.triggerEnabled);
     prefs.putBool("remoteEnabled",  config.remoteEnabled);
+    prefs.putBool("beepEnabled",    config.beepEnabled);
     
     prefs.end();
 }
@@ -76,6 +78,11 @@ void TriggerMode::toggleTrigger() {
 void TriggerMode::toggleRemote() {
     config.remoteEnabled = !config.remoteEnabled;
     state.isRunning = (config.triggerEnabled || config.remoteEnabled);
+    saveConfig();
+}
+
+void TriggerMode::toggleBeep() {
+    config.beepEnabled = !config.beepEnabled;
     saveConfig();
 }
 
@@ -163,9 +170,9 @@ void TriggerMode::triggerBoth() {
 // ============ UI INTERACTION ============
 void TriggerMode::handleEncoderRotate(int delta) {
     if (editMode.state == TriggerEditMode::SELECTING) {
-        // Navigate: 0=Trigger(G2), 1=Remote(G1), 2=TEST button
+        // Navigate: 0=Trigger(G2), 1=Remote(G1), 2=Beep, 3=TEST button
         int newIndex = editMode.selectedIndex + (delta > 0 ? 1 : -1);
-        if (newIndex >= 0 && newIndex <= 2) {
+        if (newIndex >= 0 && newIndex <= 3) {
             editMode.selectedIndex = newIndex;
         }
     }
@@ -178,6 +185,8 @@ void TriggerMode::handleButtonPress() {
         } else if (editMode.selectedIndex == 1) {
             toggleRemote();    // G1 — saves config
         } else if (editMode.selectedIndex == 2) {
+            toggleBeep();      // trigger-out beep on/off — saves config
+        } else if (editMode.selectedIndex == 3) {
             testTrigger();     // fire enabled outputs once
         }
     }
@@ -195,6 +204,7 @@ const char* TriggerMode::getSelectedItemName() {
     switch (editMode.selectedIndex) {
         case 0: return "Trigger";  // G2
         case 1: return "Remote";   // G1
+        case 2: return "Beep";
         default: return "Unknown";
     }
 }
@@ -205,6 +215,10 @@ bool TriggerMode::getTriggerEnabled() const {
 
 bool TriggerMode::getRemoteEnabled() const {
     return config.remoteEnabled;
+}
+
+bool TriggerMode::getBeepEnabled() const {
+    return config.beepEnabled;
 }
 
 bool TriggerMode::isRunning() const {

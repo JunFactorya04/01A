@@ -11,6 +11,7 @@
 struct TriggerConfig {
     bool triggerEnabled = true;   // G2 (Port B Yellow, GPIO 2) = Trigger (main)
     bool remoteEnabled  = false;  // G1 (Port B White,  GPIO 1) = Remote  (backup)
+    bool beepEnabled    = true;   // beep on each trigger-out (AUTO SHOOT / TIMELAPSE)
 };
 
 // ============ STATE STRUCTURE ============
@@ -27,7 +28,7 @@ struct TriggerEditMode {
         SELECTING = 1
     } state = IDLE;
     
-    uint8_t selectedIndex = 0;  // 0: Trigger (G2), 1: Remote (G1), 2: TEST button
+    uint8_t selectedIndex = 0;  // 0: Trigger (G2), 1: Remote (G1), 2: Beep, 3: TEST button
 };
 
 // ============ TRIGGER MODE CLASS ============
@@ -51,6 +52,7 @@ public:
     // ===== Control =====
     void toggleTrigger();
     void toggleRemote();
+    void toggleBeep();
     void enableAll();
     void disableAll();
     void testTrigger();
@@ -69,6 +71,7 @@ public:
     const char* getSelectedItemName();
     bool getTriggerEnabled() const;
     bool getRemoteEnabled() const;
+    bool getBeepEnabled() const;
     bool isRunning() const;
     uint16_t getTriggerCount() const;
     

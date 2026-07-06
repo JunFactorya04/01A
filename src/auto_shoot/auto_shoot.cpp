@@ -102,46 +102,59 @@ void AutoShoot::validateConfig() {
 void AutoShoot::update() {
     if (!state.isRunning) return;
 
-    // Pure threshold — poll every cycle for minimal latency (no throttle)
+    // 1. Detect object presence (threshold + hysteresis)
     updateSensorData();
+
+    // 2. Edge-triggered burst firing per config (burstShots + cooldownMs)
+    checkAndTrigger();
 }
 
-// ============ SENSOR + PURE THRESHOLD GPIO OUTPUT ============
+// ============ SENSOR + OBJECT DETECTION ============
 void AutoShoot::updateSensorData() {
-    // Poll TF-Luna (I2C) — returns normalized distance
-    state.currentDistance = readTfLunaDistance();
-    state.currentStrength = getTfLunaStrength();
+    // Poll TF-Luna (I2C) once
+    readTfLunaDistance();
+    const TFLunaState& s = getTfLunaState();
 
-    bool sensorOk = getTfLunaState().valid;
+    // Show the REAL sensor distance (what TF-Luna actually reports)
+    state.currentDistance = s.rawDistance_m;
+    state.currentStrength = s.strength;
 
-    // inZone = MIN_RANGE <= distance <= MAX_RANGE
-    bool inZone = sensorOk &&
-                  (state.currentDistance >= config.rangeMin &&
-                   state.currentDistance <= config.rangeMax);
+    // A detection requires a REAL object return (strength OK, not a 0mm no-return).
+    bool present = s.valid && s.objectPresent;
+
+    // Zone with hysteresis to stop boundary flicker:
+    //  - to ENTER the zone: distance must be solidly inside [min, max]
+    //  - to STAY in the zone: distance may drift out by TFLUNA_HYSTERESIS
+    const float H = TFLUNA_HYSTERESIS;
+    float d = s.rawDistance_m;
+
+    bool inZone;
+    if (state.objectDetected) {
+        inZone = present &&
+                 (d >= (config.rangeMin - H) && d <= (config.rangeMax + H));
+    } else {
+        inZone = present &&
+                 (d >= config.rangeMin && d <= config.rangeMax);
+    }
 
     state.objectDetected = inZone;
-
-    // TRIGGER mode is the master switch that decides which outputs are used:
-    //   triggerEnabled -> G2 (main), remoteEnabled -> G1 (backup mirror)
-    //   fallback: if neither enabled, G2 always works
-    bool useG2 = triggerMode.config.triggerEnabled;
-    bool useG1 = triggerMode.config.remoteEnabled;
-    if (!useG2 && !useG1) useG2 = true;
-
-    // Pure threshold level output
-    if (inZone) {
-        digitalWrite(TRIGGER_G2_PIN, useG2 ? HIGH : LOW);
-        digitalWrite(TRIGGER_G1_PIN, useG1 ? HIGH : LOW);
-    } else {
-        digitalWrite(TRIGGER_G2_PIN, LOW);
-        digitalWrite(TRIGGER_G1_PIN, LOW);
-    }
 }
 
-// ============ TRIGGER LOGIC ============
+// ============ TRIGGER LOGIC (edge-triggered burst) ============
 void AutoShoot::checkAndTrigger() {
-    // Pure threshold: GPIO driven directly in updateSensorData().
-    // No edge detection / cooldown / burst.
+    unsigned long now = millis();
+
+    // Rising edge: object just ENTERED the zone
+    if (state.objectDetected && !state.wasInRange) {
+        // Respect cooldown between bursts
+        if (now - state.lastTrigger >= (unsigned long)config.cooldownMs) {
+            triggerBurst(config.burstShots);   // fire N shots per config
+            state.lastTrigger = now;
+        }
+    }
+
+    // Track previous state for edge detection
+    state.wasInRange = state.objectDetected;
 }
 
 // ============ CAMERA TRIGGER ============
@@ -149,7 +162,7 @@ void AutoShoot::triggerCamera() {
     // Acquire global trigger lock to prevent conflict with Timelapse
     if (!acquireTriggerLock()) return;
 
-    // Fire G2 (Trigger) and/or G1 (Remote) based on TriggerMode config
+    // Fire G2 (Trigger) and/or G1 (Remote) based on TriggerMode master switch
     // If neither enabled, default to G2 (main trigger always works)
     bool fireG2 = triggerMode.config.triggerEnabled;
     bool fireG1 = triggerMode.config.remoteEnabled;
@@ -157,6 +170,7 @@ void AutoShoot::triggerCamera() {
 
     if (fireG2) digitalWrite(TRIGGER_G2_PIN, HIGH);
     if (fireG1) digitalWrite(TRIGGER_G1_PIN, HIGH);
+    if (triggerMode.config.beepEnabled && g_speakerEnabled) tone(BUZZ_PIN, 2500, 30);   // shot feedback
     delay(30);
     if (fireG2) digitalWrite(TRIGGER_G2_PIN, LOW);
     if (fireG1) digitalWrite(TRIGGER_G1_PIN, LOW);
