@@ -42,12 +42,13 @@ void FactoryTest::_power_on()
 
         if (held_ms < required_ms)
         {
-            // Released before 2s -> un-latch power and shut down
+            // Released before 2s -> un-latch power and shut down.
+            // On USB power the chip stays alive: deep sleep + button wake,
+            // so the user can simply press & hold again to retry.
             digitalWrite(POWER_HOLD_PIN, LOW);
-            while (1)
-            {
-                delay(100);
-            }
+            delay(100);
+            esp_sleep_enable_ext0_wakeup((gpio_num_t)POWER_BUTTON_PIN, 0);
+            esp_deep_sleep_start();
         }
 
         // Confirmed: short beep feedback
@@ -73,12 +74,14 @@ void FactoryTest::_power_off()
 
     printf("power off\n");
     digitalWrite(POWER_HOLD_PIN, 0);
-    delay(10000);
 
-    while (1)
-    {
-        delay(1000);
-    }
+    // On battery: releasing the latch cuts power — code below never runs.
+    // On USB/external power: the MCU stays alive, so enter deep sleep with
+    // wake on the encoder button (G42, active-low). Press & hold the button
+    // -> chip wakes -> reboots -> _power_on() asks for the 2s confirm hold.
+    delay(500);
+    esp_sleep_enable_ext0_wakeup((gpio_num_t)POWER_BUTTON_PIN, 0);
+    esp_deep_sleep_start();
 }
 
 void FactoryTest::_get_test_mode()

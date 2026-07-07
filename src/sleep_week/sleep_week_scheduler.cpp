@@ -62,7 +62,9 @@ void SleepWeekScheduler::loadConfig() {
     Preferences prefs;
     prefs.begin("sleepWeek");
     
-    config.schedulerEnabled = prefs.getBool("schedulerEnabled", false);
+    // NOTE: NVS keys are limited to 15 chars — "schedulerEnabled" (16) was
+    // silently failing to persist. Key renamed to "schedEn".
+    config.schedulerEnabled = prefs.getBool("schedEn", false);
     
     config.weeklyEnable.monday = prefs.getBool("monday", false);
     config.weeklyEnable.tuesday = prefs.getBool("tuesday", false);
@@ -86,7 +88,7 @@ void SleepWeekScheduler::saveConfig() {
     Preferences prefs;
     prefs.begin("sleepWeek");
     
-    prefs.putBool("schedulerEnabled", config.schedulerEnabled);
+    prefs.putBool("schedEn", config.schedulerEnabled);
     
     prefs.putBool("monday", config.weeklyEnable.monday);
     prefs.putBool("tuesday", config.weeklyEnable.tuesday);

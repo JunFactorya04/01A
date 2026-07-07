@@ -35,7 +35,27 @@ static void _schedulerPowerSleep() {
     }
     delay(200);
     digitalWrite(POWER_HOLD_PIN, LOW);   // release soft-power latch -> power off
-    while (1) { delay(1000); }           // halt (USB-powered fallback)
+
+    // USB/external power fallback: latch release doesn't cut power, so deep
+    // sleep. Wake sources:
+    //  - timer at the scheduled WAKE time (auto power-on for WEEK)
+    //  - encoder button (G42, active-low) for manual wake
+    // On battery the RTC alarm hardware-boots the board as before.
+    delay(500);
+
+    time_t nowT = time(nullptr);
+    struct tm* lt = (nowT > 0) ? localtime(&nowT) : nullptr;
+    if (lt) {
+        int nowS  = lt->tm_hour * 3600 + lt->tm_min * 60 + lt->tm_sec;
+        int wakeS = sleepWeekScheduler.config.timeConfig.wakeHour * 3600 +
+                    sleepWeekScheduler.config.timeConfig.wakeMinute * 60;
+        int diff = wakeS - nowS;
+        if (diff <= 0) diff += 86400;    // wake time is tomorrow
+        esp_sleep_enable_timer_wakeup((uint64_t)diff * 1000000ULL);
+    }
+
+    esp_sleep_enable_ext0_wakeup((gpio_num_t)POWER_BUTTON_PIN, 0);
+    esp_deep_sleep_start();
 }
 
 // ============ REGISTER SCHEDULER CALLBACKS (called at boot) ============
