@@ -1,146 +1,88 @@
 /**
  * @file tf_luna.h
- * @brief TF-Luna LiDAR driver — I2C mode, pure distance read + normalization
- * @date 2026-07-06
+ * @brief TF-Luna LiDAR I2C sensor API (Benewake TF-Luna)
+ * @date 2026-07-07
  *
- * I2C: SDA=GPIO13, SCL=GPIO15, addr=0x10, bus=Wire1
+ * I2C ONLY — DinMeter Port A: SDA=GPIO13, SCL=GPIO15, addr=0x10, bus=Wire1
  * (RTC BM8563 uses Wire/bus0 on GPIO11/12 — separate bus, no conflict)
+ *
+ * Register map (per Benewake datasheet / budryerson TFLuna-I2C):
+ *   0x00 DIST_LO   0x01 DIST_HI   (unit: cm)
+ *   0x02 FLUX_LO   0x03 FLUX_HI   (signal strength)
+ *   0x04 TEMP_LO   0x05 TEMP_HI   (unit: 0.01 C)
+ *
+ * Flow: TF-Luna I2C -> TFLuna API -> AutoShoot range detection
+ *       -> existing Trigger Mode -> G1/G2 output
  */
 
 #pragma once
-#include "../common/hardware_config.h"
-#include <Wire.h>
+#include <Arduino.h>
 
 // ============ TF-LUNA CONFIG ============
-#define TFLUNA_MAX_DISTANCE 8.0f     // Meters (sensor max)
-#define TFLUNA_FAR_SENTINEL 99.0f    // "no object" distance (out of any zone)
-#define TFLUNA_MIN_STRENGTH 100      // reject weak/noisy returns below this amplitude
-#define TFLUNA_HYSTERESIS   0.10f    // meters of boundary hysteresis (anti-flicker)
+#define TFLUNA_MAX_DISTANCE_M 8.0f   // sensor max range (meters), clamp above this
 
-// ============ SENSOR STATE ============
-struct TFLunaState {
-    float distance_m = TFLUNA_FAR_SENTINEL;   // gated distance for zone logic
-    float rawDistance_m = 0.0f;               // actual sensor reading (for display)
-    uint16_t strength = 0;
-    bool valid = false;          // I2C frame read OK this cycle
-    bool objectPresent = false;  // real return: strength OK and dist_mm > 0
-    unsigned long lastUpdateTime = 0;
+// TF-Luna I2C registers
+#define TFL_REG_DIST_LO 0x00
+#define TFL_REG_FLUX_LO 0x02
+
+// ============ TF-LUNA API ============
+class TFLuna {
+public:
+    /** @brief Init I2C bus (Wire1) and reset state. Call once at startup. */
+    void begin();
+
+    /**
+     * @brief Poll the sensor once over I2C and refresh internal state.
+     * Call every loop cycle (low latency, continuous reading).
+     * @return true if the I2C read succeeded this cycle.
+     */
+    bool update();
+
+    /** @brief Last measured distance in meters (0.0 = no object/no return, clamped to 8.0). */
+    float getDistance() const { return _distance_m; }
+
+    /** @brief Last signal strength (flux, 0-65535). */
+    uint16_t getStrength() const { return _strength; }
+
+    /** @brief True if the last I2C read succeeded. */
+    bool isValid() const { return _valid; }
+
+    /** @brief True if the sensor sees a real return (valid read and distance > 0). */
+    bool hasObject() const { return _valid && _distance_m > 0.0f; }
+
+    /**
+     * @brief Range detection: object present and minRange <= distance <= maxRange.
+     * Range comes dynamically from caller config — never hardcoded here.
+     */
+    bool inRange(float minRange, float maxRange) const {
+        return hasObject() && _distance_m >= minRange && _distance_m <= maxRange;
+    }
+
+    /** @brief millis() timestamp of the last successful read. */
+    unsigned long getLastUpdateTime() const { return _lastUpdateTime; }
+
+private:
+    float _distance_m = 0.0f;
+    uint16_t _strength = 0;
+    bool _valid = false;
+    unsigned long _lastUpdateTime = 0;
+
+    // Raw I2C register read (6 bytes: dist, flux, temp)
+    bool readRegisters(uint16_t &dist_cm, uint16_t &strength);
 };
 
-static TFLunaState tfLunaState;
+// Global instance
+extern TFLuna tfLuna;
 
-// ============ INITIALIZATION ============
-void initTfLuna() {
-    // Dedicated I2C bus (Wire1) for TF-Luna
-    Wire1.begin(TFLUNA_SDA_PIN, TFLUNA_SCL_PIN);
-    tfLunaState.distance_m     = TFLUNA_FAR_SENTINEL;
-    tfLunaState.valid          = false;
-    tfLunaState.objectPresent  = false;
-    tfLunaState.lastUpdateTime = millis();
-}
-
-// ============ RAW READ (I2C register mode) ============
-// TF-Luna I2C returns raw registers (NO 0x59 header):
-//   0x00 DIST_LOW  0x01 DIST_HIGH  0x02 AMP_LOW  0x03 AMP_HIGH
-// A 0mm reading = NO RETURN (nothing detected). A weak amplitude = noise.
-// Both are reported as "no object" (far sentinel) so they never trigger.
-bool readTfLunaRaw(float &distance_m, uint16_t &strength, bool &objectPresent) {
-
-    uint8_t buf[6];
-
-    Wire1.beginTransmission(TFLUNA_I2C_ADDR);
-    Wire1.write((uint8_t)0x00);              // start at DIST_LOW register
-    if (Wire1.endTransmission() != 0) {
-        return false;                        // no ACK from sensor
-    }
-
-    Wire1.requestFrom((int)TFLUNA_I2C_ADDR, 6);
-    int i = 0;
-    while (Wire1.available() && i < 6) {
-        buf[i++] = Wire1.read();
-    }
-    if (i != 6) return false;
-
-    uint16_t dist_mm = buf[0] | (buf[1] << 8);   // distance (mm)
-    strength         = buf[2] | (buf[3] << 8);   // signal amplitude
-
-    if (dist_mm > 8000) dist_mm = 8000;          // clamp absurd values
-
-    // Actual sensor distance for display (0.0m when no return)
-    tfLunaState.rawDistance_m = dist_mm / 1000.0f;
-
-    // ---- NO OBJECT / NOISE FILTER (for detection only) ----
-    // 0mm  = no return (nothing in front)  -> not an object
-    // weak = amplitude below threshold     -> noise, not an object
-    if (dist_mm == 0 || strength < TFLUNA_MIN_STRENGTH) {
-        distance_m    = TFLUNA_FAR_SENTINEL; // out of any [min,max] zone
-        objectPresent = false;
-        return true;
-    }
-
-    distance_m    = dist_mm / 1000.0f;
-    objectPresent = true;
-    return true;
-}
-
-// ============ MAIN UPDATE ============
-void updateTfLunaRaw() {
-    float    d = TFLUNA_FAR_SENTINEL;
-    uint16_t s = 0;
-    bool     present = false;
-
-    if (!readTfLunaRaw(d, s, present)) {
-        tfLunaState.valid = false;             // read failed this cycle
-        tfLunaState.objectPresent = false;
-        return;
-    }
-
-    tfLunaState.distance_m     = d;
-    tfLunaState.strength       = s;
-    tfLunaState.objectPresent  = present;
-    tfLunaState.valid          = true;
-    tfLunaState.lastUpdateTime = millis();
-}
-
-// ============ PUBLIC INTERFACE ============
-
-/** @brief Poll sensor and return normalized distance (meters). */
-float readTfLunaDistance() {
-    updateTfLunaRaw();
-    return tfLunaState.distance_m;
-}
-
-/** @brief Last distance without polling. */
-float readTfLunaDistanceRaw() {
-    return tfLunaState.distance_m;
-}
-
-/** @brief Actual sensor distance in meters (real value for display, 0 = no return). */
-float getTfLunaRawDistance() {
-    return tfLunaState.rawDistance_m;
-}
-
-/** @brief Signal strength (0-65535). */
-uint16_t getTfLunaStrength() {
-    return tfLunaState.strength;
-}
-
-/** @brief Motion detection kept for interface compatibility (unused in pure-threshold). */
-bool isTfLunaMotionDetected() {
-    return false;
-}
-
-/** @brief True if a real object return is present (strength OK and dist > 0). */
-bool isTfLunaObjectPresent() {
-    return tfLunaState.objectPresent;
-}
-
-/** @brief Full sensor state. */
-const TFLunaState& getTfLunaState() {
-    return tfLunaState;
-}
-
-/** @brief True if the last read succeeded within maxAgeMs. */
-bool isTfLunaFresh(unsigned long maxAgeMs = 200) {
-    return tfLunaState.valid && ((millis() - tfLunaState.lastUpdateTime) < maxAgeMs);
+// ============ LEGACY COMPATIBILITY WRAPPERS ============
+// Old free-function interface mapped onto the TFLuna API.
+inline void initTfLuna()                    { tfLuna.begin(); }
+inline float readTfLunaDistance()           { tfLuna.update(); return tfLuna.getDistance(); }
+inline float readTfLunaDistanceRaw()        { return tfLuna.getDistance(); }
+inline float getTfLunaRawDistance()         { return tfLuna.getDistance(); }
+inline uint16_t getTfLunaStrength()         { return tfLuna.getStrength(); }
+inline bool isTfLunaObjectPresent()         { return tfLuna.hasObject(); }
+inline bool isTfLunaMotionDetected()        { return tfLuna.hasObject(); }
+inline bool isTfLunaFresh(unsigned long maxAgeMs = 200) {
+    return tfLuna.isValid() && ((millis() - tfLuna.getLastUpdateTime()) < maxAgeMs);
 }

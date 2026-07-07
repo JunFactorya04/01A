@@ -9,8 +9,8 @@
 
 // ============ CONFIG STRUCTURE ============
 struct AutoShootConfig {
-    float rangeMin = 0.5f;      // meters
-    float rangeMax = 4.0f;      // meters
+    float rangeMin = 0.1f;      // meters
+    float rangeMax = 8.0f;      // meters
     uint8_t burstShots = 1;     // 1-10 shots
     uint16_t cooldownMs = 500;  // milliseconds
 };

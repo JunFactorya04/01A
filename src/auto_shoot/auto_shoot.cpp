@@ -20,8 +20,8 @@ AutoShoot::AutoShoot() {
 
 // ============ INITIALIZATION ============
 void AutoShoot::init() {
-    // Initialize TF-Luna sensor (I2C)
-    initTfLuna();
+    // Initialize TF-Luna sensor API (I2C, Wire1)
+    tfLuna.begin();
 
     // Initialize dual trigger output pins: G2 = main, G1 = backup mirror
     pinMode(TRIGGER_G2_PIN, OUTPUT);
@@ -51,8 +51,8 @@ void AutoShoot::loadConfig() {
     Preferences prefs;
     prefs.begin("autoShoot");
     
-    config.rangeMin = prefs.getFloat("minR", 0.5f);
-    config.rangeMax = prefs.getFloat("maxR", 4.0f);
+    config.rangeMin = prefs.getFloat("minR", 0.1f);
+    config.rangeMax = prefs.getFloat("maxR", 8.0f);
     config.burstShots = prefs.getInt("burst", 1);
     config.cooldownMs = prefs.getInt("cooldown", 500);
     
@@ -100,44 +100,28 @@ void AutoShoot::validateConfig() {
 
 // ============ MAIN UPDATE ============
 void AutoShoot::update() {
-    if (!state.isRunning) return;
-
-    // 1. Detect object presence (threshold + hysteresis)
+    // 1. Always poll the sensor so the UI shows real-time distance,
+    //    even before START (useful for aiming / setting range)
     updateSensorData();
 
-    // 2. Edge-triggered burst firing per config (burstShots + cooldownMs)
+    // 2. Firing logic only when running
+    if (!state.isRunning) return;
+
+    // Edge-triggered burst firing per config (burstShots + cooldownMs)
     checkAndTrigger();
 }
 
 // ============ SENSOR + OBJECT DETECTION ============
 void AutoShoot::updateSensorData() {
-    // Poll TF-Luna (I2C) once
-    readTfLunaDistance();
-    const TFLunaState& s = getTfLunaState();
+    // Poll TF-Luna once via the sensor API
+    tfLuna.update();
 
-    // Show the REAL sensor distance (what TF-Luna actually reports)
-    state.currentDistance = s.rawDistance_m;
-    state.currentStrength = s.strength;
+    // Real sensor values for display
+    state.currentDistance = tfLuna.getDistance();
+    state.currentStrength = tfLuna.getStrength();
 
-    // A detection requires a REAL object return (strength OK, not a 0mm no-return).
-    bool present = s.valid && s.objectPresent;
-
-    // Zone with hysteresis to stop boundary flicker:
-    //  - to ENTER the zone: distance must be solidly inside [min, max]
-    //  - to STAY in the zone: distance may drift out by TFLUNA_HYSTERESIS
-    const float H = TFLUNA_HYSTERESIS;
-    float d = s.rawDistance_m;
-
-    bool inZone;
-    if (state.objectDetected) {
-        inZone = present &&
-                 (d >= (config.rangeMin - H) && d <= (config.rangeMax + H));
-    } else {
-        inZone = present &&
-                 (d >= config.rangeMin && d <= config.rangeMax);
-    }
-
-    state.objectDetected = inZone;
+    // Range detection — dynamic range from UI config, never hardcoded
+    state.objectDetected = tfLuna.inRange(config.rangeMin, config.rangeMax);
 }
 
 // ============ TRIGGER LOGIC (edge-triggered burst) ============
