@@ -20,16 +20,31 @@
 
 // ============ TF-LUNA CONFIG ============
 #define TFLUNA_MAX_DISTANCE_M 8.0f   // sensor max range (meters), clamp above this
+#define TFLUNA_MAX_FAILS      25     // consecutive I2C failures before driver re-init
 
 // TF-Luna I2C registers
-#define TFL_REG_DIST_LO 0x00
-#define TFL_REG_FLUX_LO 0x02
+#define TFL_REG_DIST_LO    0x00
+#define TFL_REG_FLUX_LO    0x02
+#define TFL_REG_SOFT_RESET 0x21   // write 0x02 -> sensor reboots (~500ms)
+#define TFL_REG_ENABLE     0x25   // write 0 = disable (sleep), 1 = enable
 
 // ============ TF-LUNA API ============
 class TFLuna {
 public:
-    /** @brief Init I2C bus (Wire1) and reset state. Call once at startup. */
+    /** @brief Full driver re-init (also used by self-healing). */
     void begin();
+
+    /**
+     * @brief Boot-time warm-up: init bus + exercise the sensor until it
+     * streams cleanly (10 good reads), bounded by maxMs. Call from setup().
+     */
+    void warmUp(unsigned long maxMs = 500);
+
+    /** @brief Put the sensor to sleep (reg 0x25=0). Call when leaving Auto Shoot. */
+    void sleep();
+
+    /** @brief Wake the sensor (reg 0x25=1). Stays initialized — resumes fast. */
+    void wake();
 
     /**
      * @brief Poll the sensor once over I2C and refresh internal state.
@@ -66,9 +81,16 @@ private:
     uint16_t _strength = 0;
     bool _valid = false;
     unsigned long _lastUpdateTime = 0;
+    uint16_t _failCount = 0;              // consecutive I2C failures
+    bool _started = false;                // begin() has run at least once
+    unsigned long _lastRecoverTime = 0;   // rate-limit bus recovery
+    unsigned long _lastAttemptTime = 0;   // rate-limit retries while failing
 
     // Raw I2C register read (6 bytes: dist, flux, temp)
     bool readRegisters(uint16_t &dist_cm, uint16_t &strength);
+
+    // Reboot the sensor itself (reg 0x21 = 0x02) when its I2C engine hangs
+    void softResetSensor();
 };
 
 // Global instance

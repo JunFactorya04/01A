@@ -10,6 +10,7 @@
  */
 #include "factory_test/factory_test.h"
 #include "common/hardware_config.h"
+#include "auto_shoot/tf_luna.h"
 
 static FactoryTest ft;
 
@@ -19,6 +20,7 @@ void view_update();
 void setup()
 {
     ft.init();
+
     view_create(&ft);
 
     // If we booted from an RTC scheduled wake inside the awake window,

@@ -7,6 +7,7 @@
 #include "factory_test.h"
 #include "../auto_shoot/auto_shoot.h"
 #include "../auto_shoot/auto_shoot_ui.h"
+#include "../auto_shoot/tf_luna.h"
 
 extern FactoryTest* _ft;
 
