@@ -24,6 +24,7 @@ void FactoryTest::_timelapse_test() {
         _timelapse_loop();
         
         if (_mode_exit_requested) {
+            _scheduler_autostart_pending = false;   // cancel pending auto-START
             timelapse.stop();
             break;
         }
@@ -35,6 +36,14 @@ void FactoryTest::_timelapse_test() {
 // ============ TIMELAPSE LOOP ============
 void FactoryTest::_timelapse_loop() {
     
+    // 0. Scheduler auto-START (armed only by a scheduled WEEK wake):
+    //    fires 10s after mode entry, then behaves exactly like pressing START
+    if (_scheduler_autostart_pending && millis() >= _scheduler_autostart_at) {
+        _scheduler_autostart_pending = false;
+        timelapse.start();
+        _tone(800, 200);
+    }
+
     // 1. Update Timelapse logic
     timelapse.update();
     

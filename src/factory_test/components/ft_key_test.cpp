@@ -27,6 +27,7 @@ void FactoryTest::_power_on()
     // If the button is NOT pressed (e.g. RTC scheduled wake) -> power on now.
     if (digitalRead(POWER_BUTTON_PIN) == LOW)
     {
+        _manual_power_on = true;   // user-initiated boot -> go to main menu
         const int required_ms = 2000;
         int held_ms = 0;
 

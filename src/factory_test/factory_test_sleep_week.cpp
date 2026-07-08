@@ -65,11 +65,21 @@ void FactoryTest::_scheduler_register_callbacks() {
 }
 
 // ============ BOOT AUTO-RESUME ============
-// If the scheduler is enabled and we are inside today's awake window,
-// automatically enter the configured capture mode after an RTC wake.
+// Only after a SCHEDULED wake (RTC alarm / deep-sleep timer): enter the
+// configured capture mode, wait 10s (gear-up grace), then START it.
+// A manual button power-on always goes to the main menu instead.
 void FactoryTest::_scheduler_boot_resume() {
+    if (_manual_power_on) return;                       // user booted -> main menu
     if (!sleepWeekScheduler.shouldBeAwakeNow()) return;
-    switch (sleepWeekScheduler.getMode()) {
+
+    SchedulerMode m = sleepWeekScheduler.getMode();
+    if (m != MODE_AUTO_SHOOT && m != MODE_TIMELAPSE) return;
+
+    // Arm delayed auto-START (10s), consumed inside the mode loop
+    _scheduler_autostart_pending = true;
+    _scheduler_autostart_at = millis() + 10000;
+
+    switch (m) {
         case MODE_AUTO_SHOOT: _auto_shoot_test(); break;
         case MODE_TIMELAPSE:  _timelapse_test();  break;
         default: break;

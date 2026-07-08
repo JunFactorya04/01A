@@ -157,6 +157,9 @@ public:
     bool _mode_btn_pressed = false;
     unsigned long _mode_btn_press_start = 0;
     bool _mode_exit_requested = false;
+    bool _manual_power_on = false;             // powered on by button (not scheduled wake)
+    bool _scheduler_autostart_pending = false; // WEEK wake: auto-START after delay
+    unsigned long _scheduler_autostart_at = 0; // millis() when auto-START fires
 
     /* Setting */
     void _setting_test();
