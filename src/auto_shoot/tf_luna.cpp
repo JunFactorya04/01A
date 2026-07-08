@@ -109,6 +109,11 @@ void TFLuna::softResetSensor() {
 
 // ============ MAIN UPDATE ============
 bool TFLuna::update() {
+    // Never touch the bus before begin(): polling an un-initialized bus
+    // racks up fails and triggers self-healing register writes (0x21)
+    // that stall the sensor for seconds.
+    if (!_started) return false;
+
     unsigned long now = millis();
 
     // Pace polling to the sensor frame rate (100Hz = 10ms). Hammering the

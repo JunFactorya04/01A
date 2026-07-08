@@ -136,9 +136,13 @@ void FactoryTest::_sleep_week_loop() {
     // 1. Update Sleep Week Scheduler logic
     sleepWeekScheduler.update();
 
-    // 2. Run active capture modes (started by wakeUp(), safe to call always —
-    //    both guards against isRunning/enable internally)
-    autoShoot.update();
+    // 2. Run active capture modes ONLY when actually started by wakeUp().
+    //    BUGFIX: autoShoot.update() has NO isRunning guard (it always polls
+    //    TF-Luna for the realtime display). Calling it here every loop made
+    //    the driver poll an un-initialized bus, hit 25 fails, and fire
+    //    softResetSensor() (reg 0x21 write) every 3s — register writes stall
+    //    the TF-Luna for many seconds, wrecking Auto Shoot afterwards.
+    if (autoShoot.state.isRunning) autoShoot.update();
     timelapse.update();
     
     // 3. Handle input
