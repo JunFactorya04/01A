@@ -75,15 +75,47 @@ void FactoryTest::_scheduler_boot_resume() {
     SchedulerMode m = sleepWeekScheduler.getMode();
     if (m != MODE_AUTO_SHOOT && m != MODE_TIMELAPSE) return;
 
-    // Arm delayed auto-START (10s), consumed inside the mode loop
+    // Arm delayed auto-START (5s), consumed inside the mode loop.
+    // The mode loop shows a countdown popup until it fires.
     _scheduler_autostart_pending = true;
-    _scheduler_autostart_at = millis() + 10000;
+    _scheduler_autostart_at = millis() + 5000;
 
     switch (m) {
         case MODE_AUTO_SHOOT: _auto_shoot_test(); break;
         case MODE_TIMELAPSE:  _timelapse_test();  break;
         default: break;
     }
+}
+
+// ============ AUTOSTART COUNTDOWN POPUP ============
+// Drawn OVER the mode UI (Auto Shoot / Timelapse) while a scheduled-wake
+// auto-START is pending. Only ever visible after a scheduled wake — the
+// pending flag is armed exclusively by _scheduler_boot_resume().
+void FactoryTest::_scheduler_autostart_popup() {
+    if (!_scheduler_autostart_pending || !_canvas) return;
+
+    long remainMs = (long)(_scheduler_autostart_at - millis());
+    if (remainMs < 0) remainMs = 0;
+    int secs = (int)((remainMs + 999) / 1000);   // ceil -> 5,4,3,2,1
+
+    // Centered popup box
+    const int w = 150, h = 44;
+    const int x = (240 - w) / 2, y = (135 - h) / 2;
+    _canvas->fillRoundRect(x, y, w, h, 6, 0x0000);
+    _canvas->drawRoundRect(x, y, w, h, 6, 0xFFE0);   // yellow border
+
+    _canvas->setFont(&fonts::efontCN_12);
+    _canvas->setTextDatum(top_center);
+    _canvas->setTextColor(0xFFFF);
+    _canvas->drawString("AUTO START", 120, y + 8);
+
+    char buf[16];
+    snprintf(buf, sizeof(buf), "in %ds", secs);
+    _canvas->setTextColor(0xFFE0);
+    _canvas->drawString(buf, 120, y + 24);
+    _canvas->setTextDatum(top_left);
+
+    _canvas_update();
 }
 
 // ============ SLEEP WEEK TEST ============

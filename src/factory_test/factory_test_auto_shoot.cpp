@@ -38,7 +38,7 @@ void FactoryTest::_auto_shoot_test() {
 void FactoryTest::_auto_shoot_loop() {
     
     // 0. Scheduler auto-START (armed only by a scheduled WEEK wake):
-    //    fires 10s after mode entry, then behaves exactly like pressing START
+    //    shows a countdown popup, then behaves exactly like pressing START
     if (_scheduler_autostart_pending && millis() >= _scheduler_autostart_at) {
         _scheduler_autostart_pending = false;
         autoShoot.start();
@@ -53,6 +53,9 @@ void FactoryTest::_auto_shoot_loop() {
     
     // 3. Render UI
     renderAutoShootUI();
+
+    // 4. Countdown popup on top (no-op unless autostart is pending)
+    _scheduler_autostart_popup();
 }
 
 // ============ INPUT HANDLING ============

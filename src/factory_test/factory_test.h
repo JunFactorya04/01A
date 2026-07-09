@@ -153,6 +153,7 @@ public:
     void handleSleepWeekButtonShortPress();
     void handleSleepWeekButtonLongPress();
     void _scheduler_register_callbacks();
+    void _scheduler_autostart_popup();         // countdown overlay while autostart pending
     int _sleep_week_enc_last_pos = 0;
     bool _mode_btn_pressed = false;
     unsigned long _mode_btn_press_start = 0;

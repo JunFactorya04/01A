@@ -37,7 +37,7 @@ void FactoryTest::_timelapse_test() {
 void FactoryTest::_timelapse_loop() {
     
     // 0. Scheduler auto-START (armed only by a scheduled WEEK wake):
-    //    fires 10s after mode entry, then behaves exactly like pressing START
+    //    shows a countdown popup, then behaves exactly like pressing START
     if (_scheduler_autostart_pending && millis() >= _scheduler_autostart_at) {
         _scheduler_autostart_pending = false;
         timelapse.start();
@@ -52,6 +52,9 @@ void FactoryTest::_timelapse_loop() {
     
     // 3. Render UI
     renderTimelapseUI();
+
+    // 4. Countdown popup on top (no-op unless autostart is pending)
+    _scheduler_autostart_popup();
 }
 
 // ============ INPUT HANDLING ============
