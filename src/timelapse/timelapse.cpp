@@ -105,10 +105,10 @@ void Timelapse::triggerCamera() {
     if (!acquireTriggerLock()) return;
 
     // Fire G2 (Trigger) and/or G1 (Remote) based on TriggerMode config
-    // If neither enabled, default to G2 (main trigger always works)
+    // If NO channel enabled (incl. Bluetooth), default to G2 (main always works)
     bool fireG2 = triggerMode.config.triggerEnabled;
     bool fireG1 = triggerMode.config.remoteEnabled;
-    if (!fireG2 && !fireG1) fireG2 = true;
+    if (!fireG2 && !fireG1 && !triggerMode.config.bluetoothEnabled) fireG2 = true;
 
     if (fireG2) digitalWrite(TRIGGER_G2_PIN, HIGH);
     if (fireG1) digitalWrite(TRIGGER_G1_PIN, HIGH);
@@ -118,6 +118,9 @@ void Timelapse::triggerCamera() {
     if (fireG1) digitalWrite(TRIGGER_G1_PIN, LOW);
 
     releaseTriggerLock();
+
+    // 3rd channel: BLE camera remote — same command, after GPIO pulse
+    triggerMode.fireBluetoothIfEnabled();
 }
 
 // ============ CONTROL ============

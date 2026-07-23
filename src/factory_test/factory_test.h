@@ -162,6 +162,16 @@ public:
     bool _scheduler_autostart_pending = false; // WEEK wake: auto-START after delay
     unsigned long _scheduler_autostart_at = 0; // millis() when auto-START fires
 
+    /* Display Mode (brightness + power save) */
+    void _display_mode_test();
+    void _display_mode_loop();
+    void handleDisplayInput();
+    int _display_enc_last_pos = 0;
+
+    /* OTA Update */
+    void _ota_update_test();
+    int _ota_enc_last_pos = 0;
+
     /* Setting */
     void _setting_test();
     void _setting_loop();

@@ -6,6 +6,7 @@
 
 #include "setting.h"
 #include "../factory_test/factory_test.h"
+#include "../common/ui_theme.h"   // themed palette
 #include "../sleep_week/sleep_week_ui.h"
 #include <smooth_ui_toolkit.h>
 #include <time.h>
@@ -16,14 +17,14 @@ extern FactoryTest* _ft;
 #define SCREEN_WIDTH  240
 #define SCREEN_HEIGHT 135
 
-#define COLOR_BG        0x0000
-#define COLOR_TEXT      0xFFFF
+#define COLOR_BG        UI_BG
+#define COLOR_TEXT      UI_FG
 #define COLOR_GREEN     0x07E0
 #define COLOR_RED       0xF800
 #define COLOR_YELLOW    0xFFE0
 #define COLOR_ORANGE    0xFD20
-#define COLOR_BORDER    0x4208
-#define COLOR_HIGHLIGHT 0x27E0
+#define COLOR_BORDER    UI_BORDER
+#define COLOR_HIGHLIGHT UI_AL
 
 #define ITEM_HEIGHT   16
 #define ITEM_Y_START  20

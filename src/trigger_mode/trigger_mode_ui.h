@@ -10,3 +10,4 @@
 // ============ UI RENDER FUNCTIONS ============
 void renderTriggerModeUI();
 void initTriggerModeUI();
+void renderBtPairingScreen();

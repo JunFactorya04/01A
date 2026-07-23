@@ -11,6 +11,7 @@
 #include "../factory_test/factory_test.h"
 #include "../sleep_week/sleep_week_scheduler.h"
 #include "../sleep_week/sleep_week_ui.h"
+#include "../display_mode/display_mode.h"
 #include "assets/assets.h"
 #include <Arduino.h>
 #include <smooth_ui_toolkit.h>
@@ -30,9 +31,9 @@ struct AppOptionRenderProps_t
 constexpr int _app_render_props_list_size = 8;
 constexpr AppOptionRenderProps_t _app_render_props_list[] = {
     {0xB8DBD9, 0x385B59, "AUTO SHOOT", image_data_icon_display},
-    {0x87C38F, 0x07430F, "BRIGHTNESS", image_data_icon_brightness},
+    {0x87C38F, 0x07430F, "DISPLAY", image_data_icon_brightness},
     {0xC9C9EE, 0x49496E, "TIMELAPSE", image_data_icon_rtc},
-    {0xF6A4A4, 0x762424, "WIFI SCAN", image_data_icon_wifi},
+    {0xF6A4A4, 0x762424, "OTA UPDATE", image_data_icon_wifi},
     {0x6AB8A0, 0x163820, "TRIGGER", image_data_icon_encoder},
     // {0xC2C1A5, 0x424125, "MENU DEMO", image_data_icon_menu},
     {0xF5C396, 0x754316, "SETTING", image_data_icon_menu},
@@ -56,6 +57,21 @@ class LauncherMenu : public SmoothOptions
     {
         if (isOpening())
             return;
+
+        // ── Power save (main menu only) ──
+        DisplayPowerSave::tick();
+        {
+            bool encMoved = (_ft->_enc.getPosition() != _last_enc_postion);
+            bool btnDown  = !_ft->_btn_pwr.read();
+            if ((encMoved || btnDown) && DisplayPowerSave::wake())
+            {
+                // Swallow the waking input (M5Launcher wakeUpScreen pattern)
+                _last_enc_postion = _ft->_enc.getPosition();
+                if (btnDown)
+                    _wait_button_released = true;
+                return;
+            }
+        }
 
         // Update navigation
         _ft->_check_encoder(true);
@@ -213,15 +229,18 @@ class LauncherMenu : public SmoothOptions
 
     void _open_app()
     {
+        // Leave power save fully awake before entering any app
+        DisplayPowerSave::exitPowerSave();
+
         int matching_index = getSelectedOptionIndex();
         if (matching_index == 0)
             _ft->_auto_shoot_test();
         else if (matching_index == 1)
-            _ft->_disp_set_brightness();
+            _ft->_display_mode_test();
         else if (matching_index == 2)
             _ft->_timelapse_test();
         else if (matching_index == 3)
-            _ft->_wifi_test();
+            _ft->_ota_update_test();
         else if (matching_index == 4)
             _ft->_trigger_mode_test();
         else if (matching_index == 5)
@@ -238,6 +257,14 @@ static LauncherMenu* _launcher_menu = nullptr;
 void view_create(FactoryTest* ft)
 {
     _ft = ft;
+
+    // Apply persisted display config (brightness + power save + theme + rotation)
+    displayMode.loadConfig();
+    displayMode.applyBrightness();
+    displayMode.applyTheme();
+    displayMode.applyRotation();
+    DisplayPowerSave::exitPowerSave();
+
     _ft->_enc.setPosition(_last_enc_postion);
     _ft->_canvas->setFont(&fonts::efontCN_24);
     _ft->_canvas->setTextSize(1);

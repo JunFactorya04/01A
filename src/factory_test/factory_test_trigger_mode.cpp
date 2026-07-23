@@ -39,10 +39,17 @@ void FactoryTest::_trigger_mode_loop() {
     // 1. Update Trigger Mode logic
     triggerMode.update();
     
-    // 2. Handle input
+    // 2. Deferred Bluetooth pairing (blocking ~10s scan; show notice first)
+    if (triggerMode.btPairRequested) {
+        renderBtPairingScreen();
+        triggerMode.doBtPair();
+        _reset_mode_input_state();
+    }
+    
+    // 3. Handle input
     handleTriggerModeInput();
     
-    // 3. Render UI
+    // 4. Render UI
     renderTriggerModeUI();
 }
 
@@ -68,7 +75,13 @@ void FactoryTest::handleTriggerModeButtonShortPress() {
 }
 
 void FactoryTest::handleTriggerModeButtonLongPress() {
+    // In Bluetooth sub-screen: long press = back to main list, not exit
+    bool wasInBt = triggerMode.inBluetoothScreen();
     triggerMode.handleButtonLongPress();
+    if (wasInBt) {
+        _tone(1000, 100);
+        return;
+    }
     _mode_exit_requested = true;
     _tone(1500, 150);
 }

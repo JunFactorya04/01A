@@ -6,6 +6,7 @@
 
 #include "timelapse.h"
 #include "../factory_test/factory_test.h"
+#include "../common/ui_theme.h"   // themed palette
 #include "../sleep_week/sleep_week_ui.h"
 #include <smooth_ui_toolkit.h>
 
@@ -23,14 +24,14 @@ void renderTimelapseControlButtons();
 #define SCREEN_HEIGHT 135
 
 // Colors
-#define COLOR_BG 0x0000        // Black
-#define COLOR_TEXT 0xFFFF      // White
+#define COLOR_BG UI_BG          // themed
+#define COLOR_TEXT UI_FG        // themed
 #define COLOR_GREEN 0x07E0     // Green
 #define COLOR_RED 0xF800       // Red
 #define COLOR_YELLOW 0xFFE0    // Yellow
 #define COLOR_BLUE 0x001F      // Blue
-#define COLOR_BORDER 0x4208    // Dark gray
-#define COLOR_HIGHLIGHT 0x27E0 // Bright green
+#define COLOR_BORDER UI_BORDER  // themed
+#define COLOR_HIGHLIGHT UI_AL   // themed
 
 // Layout
 #define ITEM_HEIGHT 22

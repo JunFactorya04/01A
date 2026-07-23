@@ -7,6 +7,7 @@
 #include "sleep_week_scheduler.h"
 #include "sleep_week_ui.h"
 #include "../factory_test/factory_test.h"
+#include "../common/ui_theme.h"   // themed palette
 #include <smooth_ui_toolkit.h>
 #include <time.h>
 
@@ -24,13 +25,13 @@ void renderStatus();
 #define SCREEN_HEIGHT 135
 
 // Colors
-#define COLOR_BG 0x0000
-#define COLOR_TEXT 0xFFFF
+#define COLOR_BG UI_BG
+#define COLOR_TEXT UI_FG
 #define COLOR_GREEN 0x07E0
 #define COLOR_RED 0xF800
 #define COLOR_BLUE 0x001F
-#define COLOR_BORDER 0x4208
-#define COLOR_HIGHLIGHT 0x27E0
+#define COLOR_BORDER UI_BORDER
+#define COLOR_HIGHLIGHT UI_AL
 
 // Layout
 #define DAY_HEIGHT 18
