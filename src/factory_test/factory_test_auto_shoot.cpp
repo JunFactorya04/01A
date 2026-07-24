@@ -30,7 +30,8 @@ void FactoryTest::_auto_shoot_test() {
             break;
         }
         
-        delay(10);
+        delay(1);   // yield only — poll runs every ~1ms; I2C pace (10ms/100Hz)
+                    // is enforced INSIDE the TF-Luna driver, unchanged
     }
 }
 
@@ -45,17 +46,24 @@ void FactoryTest::_auto_shoot_loop() {
         _tone(800, 200);
     }
 
-    // 1. Update Auto Shoot logic
+    // 1. Update Auto Shoot logic EVERY cycle (~1ms). Driver-internal pacing
+    //    keeps I2C at 100Hz exactly as before; trigger fires on the freshest
+    //    frame instead of waiting behind a 20-30ms render.
     autoShoot.update();
     
-    // 2. Handle input
+    // 2. Handle input every cycle — encoder/button extra snappy
     handleAutoShootInput();
     
-    // 3. Render UI
-    renderAutoShootUI();
+    // 3. Render UI throttled to ~30fps so the slow canvas push no longer
+    //    sits between sensor polls (render never blocks detection)
+    static unsigned long lastRender = 0;
+    if (millis() - lastRender >= 33) {
+        lastRender = millis();
+        renderAutoShootUI();
 
-    // 4. Countdown popup on top (no-op unless autostart is pending)
-    _scheduler_autostart_popup();
+        // 4. Countdown popup on top (no-op unless autostart is pending)
+        _scheduler_autostart_popup();
+    }
 }
 
 // ============ INPUT HANDLING ============
