@@ -31,8 +31,8 @@ void renderAutoShootControlButtons();
 #define COLOR_BORDER UI_BORDER
 #define COLOR_HIGHLIGHT UI_AL
 
-#define ITEM_HEIGHT 14
-#define ITEM_Y_START 22
+#define ITEM_HEIGHT 20
+#define ITEM_Y_START 27
 #define ITEM_INDENT 10
 
 // ============ UI STATE ============
@@ -93,12 +93,12 @@ void renderAutoShootHeader() {
 void renderAutoShootSettingsPanel() {
     if (!_ft || !_ft->_canvas) return;
 
-    _ft->_canvas->drawRoundRect(8, 16, 224, 64, 5, COLOR_BORDER);
+    _ft->_canvas->drawRoundRect(8, 22, 224, 88, 5, COLOR_BORDER);
 
-    _ft->_canvas->setFont(&fonts::efontCN_12);
+    _ft->_canvas->setFont(&fonts::efontCN_16);
     _ft->_canvas->setTextDatum(top_left);
 
-    renderAutoShootSettingsItem(0, "Range Min", autoShoot.config.rangeMin, " m");
+    renderAutoShootSettingsItem(0, "Range", autoShoot.config.rangeMin, " m");
     renderAutoShootSettingsItem(1, "Range Max", autoShoot.config.rangeMax, " m");
     renderAutoShootSettingsItem(2, "Burst", (float)autoShoot.config.burstShots, "");
     renderAutoShootSettingsItem(3, "Cool", (float)autoShoot.config.cooldownMs, " ms");
@@ -117,14 +117,14 @@ void renderAutoShootSettingsItem(uint8_t index, const char* label, float value, 
     bool isEditing = (autoShoot.editMode.state == EditMode::EDITING && isSelected);
 
     if (isSelected) {
-        _ft->_canvas->fillRoundRect(10, y - 1, 220, 12, 3,
+        _ft->_canvas->fillRoundRect(10, y - 1, 220, 18, 3,
             isEditing ? COLOR_HIGHLIGHT : COLOR_BORDER);
     }
 
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_TEXT);
 
-    _ft->_canvas->drawString(label, ITEM_INDENT + 6, y + 2);
+    _ft->_canvas->drawString(label, ITEM_INDENT + 6, y + 1);
 
     char valueStr[32];
 
@@ -140,10 +140,10 @@ void renderAutoShootSettingsItem(uint8_t index, const char* label, float value, 
         _ft->_canvas->setTextColor(COLOR_BG);
     }
 
-    _ft->_canvas->drawString(valueStr, 210, y + 2);
+    _ft->_canvas->drawString(valueStr, 210, y + 1);
 
     _ft->_canvas->setTextColor(COLOR_GREEN);
-    _ft->_canvas->drawString(">", 225, y + 2);
+    _ft->_canvas->drawString(">", 225, y + 1);
 
     _ft->_canvas->setTextDatum(top_left);
 }
@@ -152,40 +152,28 @@ void renderAutoShootSettingsItem(uint8_t index, const char* label, float value, 
 void renderAutoShootStatusPanel() {
     if (!_ft || !_ft->_canvas) return;
 
-    int y = 82;
+    int y = 113;
 
-    _ft->_canvas->drawRoundRect(8, y, 224, 26, 5, COLOR_BORDER);
+    _ft->_canvas->drawRoundRect(8, y, 106, 20, 5, COLOR_BORDER);
 
     const char* status = autoShoot.getStatusString();
     if (!status) status = "IDLE";
 
-    // Row 1: TF distance (left) + Status (right) — all efontCN_12, no overlap
-    _ft->_canvas->setFont(&fonts::efontCN_12);
+    // One line: TF distance (left) + status (right)
+    _ft->_canvas->setFont(&fonts::efontCN_10);
     _ft->_canvas->setTextDatum(top_left);
-    _ft->_canvas->setTextColor(COLOR_TEXT);
-    _ft->_canvas->drawString("TF:", 12, y + 4);
 
     char distStr[32];
-    snprintf(distStr, sizeof(distStr), "%.1fm", autoShoot.state.currentDistance);
-    _ft->_canvas->setTextColor(COLOR_GREEN);
-    _ft->_canvas->drawString(distStr, 33, y + 4);
-
-    _ft->_canvas->setTextColor(COLOR_TEXT);
-    _ft->_canvas->setTextDatum(top_right);
-    _ft->_canvas->drawString("St:", 155, y + 4);
+    snprintf(distStr, sizeof(distStr), "TF:%.1fm", autoShoot.state.currentDistance);
+    _ft->_canvas->setTextColor(autoShoot.state.objectDetected ? COLOR_GREEN : COLOR_TEXT);
+    _ft->_canvas->drawString(distStr, 14, y + 6);
 
     uint16_t color = COLOR_GREEN;
     if (strcmp(status, "IDLE") == 0) color = COLOR_TEXT;
     if (strcmp(status, "DETECTING") == 0) color = COLOR_YELLOW;
+    _ft->_canvas->setTextDatum(top_right);
     _ft->_canvas->setTextColor(color);
-    _ft->_canvas->drawString(status, 230, y + 4);
-
-    // Row 2: motion indicator centered
-    _ft->_canvas->setTextDatum(top_center);
-    _ft->_canvas->setFont(&fonts::efontCN_10);
-    const char* motion = autoShoot.state.objectDetected ? "DETECTED" : "---";
-    _ft->_canvas->setTextColor(autoShoot.state.objectDetected ? COLOR_GREEN : COLOR_TEXT);
-    _ft->_canvas->drawString(motion, 120, y + 14);
+    _ft->_canvas->drawString(status, 108, y + 6);
 
     _ft->_canvas->setTextDatum(top_left);
 }
@@ -194,7 +182,7 @@ void renderAutoShootStatusPanel() {
 void renderAutoShootControlButtons() {
     if (!_ft || !_ft->_canvas) return;
 
-    int btnY = 110;
+    int btnY = 113;
 
     _ft->_canvas->setFont(&fonts::efontCN_10);
     _ft->_canvas->setTextDatum(top_center);
@@ -203,26 +191,26 @@ void renderAutoShootControlButtons() {
     bool stopSel  = (autoShoot.editMode.selectedIndex == 5 && autoShoot.editMode.state == EditMode::SELECTING);
 
     // START button
-    _ft->_canvas->drawRoundRect(12, btnY, 100, 14, 3,
+    _ft->_canvas->drawRoundRect(122, btnY, 52, 20, 5,
         (startSel || autoShoot.state.isRunning) ? COLOR_GREEN : COLOR_BORDER);
     if (startSel) {
-        _ft->_canvas->fillRoundRect(13, btnY + 1, 98, 12, 3, COLOR_GREEN);
+        _ft->_canvas->fillRoundRect(123, btnY + 1, 50, 18, 4, COLOR_GREEN);
         _ft->_canvas->setTextColor(COLOR_BG);
     } else {
         _ft->_canvas->setTextColor(autoShoot.state.isRunning ? COLOR_BG : COLOR_GREEN);
     }
-    _ft->_canvas->drawString("START", 62, btnY + 2);
+    _ft->_canvas->drawString("START", 148, btnY + 6);
 
     // STOP button
-    _ft->_canvas->drawRoundRect(128, btnY, 100, 14, 3,
+    _ft->_canvas->drawRoundRect(180, btnY, 52, 20, 5,
         (stopSel || autoShoot.state.isRunning) ? COLOR_RED : COLOR_BORDER);
     if (stopSel) {
-        _ft->_canvas->fillRoundRect(129, btnY + 1, 98, 12, 3, COLOR_RED);
+        _ft->_canvas->fillRoundRect(181, btnY + 1, 50, 18, 4, COLOR_RED);
         _ft->_canvas->setTextColor(COLOR_BG);
     } else {
         _ft->_canvas->setTextColor(autoShoot.state.isRunning ? COLOR_RED : COLOR_TEXT);
     }
-    _ft->_canvas->drawString("STOP", 178, btnY + 2);
+    _ft->_canvas->drawString("STOP", 206, btnY + 6);
 }
 
 // ============ INIT ============

@@ -93,8 +93,8 @@ void AutoShoot::validateConfig() {
     if (config.burstShots < 1) config.burstShots = 1;
     if (config.burstShots > 10) config.burstShots = 10;
     
-    // Clamp Cooldown
-    if (config.cooldownMs < 50) config.cooldownMs = 50;
+    // Clamp Cooldown (0 = no delay between bursts)
+    if (config.cooldownMs < 0) config.cooldownMs = 0;
     if (config.cooldownMs > 5000) config.cooldownMs = 5000;
 }
 

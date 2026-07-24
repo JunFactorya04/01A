@@ -1,7 +1,11 @@
 /**
  * @file trigger_mode_ui.cpp
  * @brief Trigger Mode UI - ON/OFF labels for G1, G2
- * @date 2026-07-03
+ * @date 2026-07-24
+ *
+ * Follows GEOPIX UI STANDARD (see display_mode_ui.cpp):
+ * themed header + rounded panel y=22 + inverse selection rows,
+ * efontCN_16 items, bottom status panel y=113 h=20, no footer captions.
  */
 
 #include "trigger_mode.h"
@@ -36,10 +40,10 @@ void renderBtRow(uint8_t index, const char* label, const char* value, int y);
 #define COLOR_BORDER UI_BORDER  // themed
 #define COLOR_HIGHLIGHT UI_AL   // themed
 
-// Layout
-#define ITEM_HEIGHT 30
-#define ITEM_Y_START 22
-#define ITEM_INDENT 15
+// Layout (GEOPIX UI standard)
+#define ITEM_HEIGHT 20
+#define ITEM_Y_START 27
+#define ITEM_INDENT 16
 
 // ============ RENDER FUNCTIONS ============
 void renderTriggerModeUI() {
@@ -87,37 +91,38 @@ void renderTriggerHeader() {
 
 // ============ G1/G2/BEEP/BT LABELS ============
 void renderG1G2Labels() {
-    _ft->_canvas->setFont(&fonts::efontCN_12);
+    // Settings panel (GEOPIX standard: y=22, gap below header)
+    _ft->_canvas->drawRoundRect(8, 22, 224, 88, 5, COLOR_BORDER);
+
+    _ft->_canvas->setFont(&fonts::efontCN_16);
     _ft->_canvas->setTextDatum(top_left);
 
-    // 4 compact rows
-    renderToggleLabel(0, "Trigger", triggerMode.getTriggerEnabled(), 18);
-    renderToggleLabel(1, "Remote",  triggerMode.getRemoteEnabled(),  37);
-    renderToggleLabel(2, "Beep",    triggerMode.getBeepEnabled(),    56);
-    renderBluetoothRow(75);
+    renderToggleLabel(0, "Trigger", triggerMode.getTriggerEnabled(), ITEM_Y_START);
+    renderToggleLabel(1, "Remote",  triggerMode.getRemoteEnabled(),  ITEM_Y_START + ITEM_HEIGHT);
+    renderToggleLabel(2, "Beep",    triggerMode.getBeepEnabled(),    ITEM_Y_START + ITEM_HEIGHT * 2);
+    renderBluetoothRow(ITEM_Y_START + ITEM_HEIGHT * 3);
 }
 
 void renderToggleLabel(uint8_t index, const char* label, bool enabled, int y) {
     bool isSelected = (triggerMode.editMode.selectedIndex == index);
 
-    // Background highlight — AUTO SHOOT style (COLOR_BORDER when selected)
     if (isSelected) {
-        _ft->_canvas->fillRoundRect(10, y - 2, 222, 18, 4, COLOR_BORDER);
+        _ft->_canvas->fillRoundRect(10, y - 1, 220, 18, 3, COLOR_BORDER);
     }
 
     // Label
     _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_TEXT);
     _ft->_canvas->setTextDatum(top_left);
-    _ft->_canvas->drawString(label, ITEM_INDENT, y + 3);
+    _ft->_canvas->drawString(label, ITEM_INDENT, y);
 
     // ON/OFF indicator — green/red
     _ft->_canvas->setTextDatum(top_right);
     _ft->_canvas->setTextColor(enabled ? COLOR_GREEN : COLOR_RED);
-    _ft->_canvas->drawString(enabled ? "ON" : "OFF", 218, y + 3);
+    _ft->_canvas->drawString(enabled ? "ON" : "OFF", 210, y);
 
     // Arrow
     _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_GREEN);
-    _ft->_canvas->drawString(">", 233, y + 3);
+    _ft->_canvas->drawString(">", 226, y);
 
     _ft->_canvas->setTextDatum(top_left);
 }
@@ -128,12 +133,12 @@ void renderBluetoothRow(int y) {
     bool enabled = triggerMode.getBluetoothEnabled();
 
     if (isSelected) {
-        _ft->_canvas->fillRoundRect(10, y - 2, 222, 18, 4, COLOR_BORDER);
+        _ft->_canvas->fillRoundRect(10, y - 1, 220, 18, 3, COLOR_BORDER);
     }
 
     _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_TEXT);
     _ft->_canvas->setTextDatum(top_left);
-    _ft->_canvas->drawString("Bluetooth", ITEM_INDENT, y + 3);
+    _ft->_canvas->drawString("Bluetooth", ITEM_INDENT, y);
 
     // "ON SONY" / "OFF" — driver name shown when a BLE brand is selected
     CameraBrand brand = RemoteManager::getBrand();
@@ -145,57 +150,57 @@ void renderBluetoothRow(int y) {
     }
     _ft->_canvas->setTextDatum(top_right);
     _ft->_canvas->setTextColor(enabled ? COLOR_GREEN : COLOR_RED);
-    _ft->_canvas->drawString(valStr, 218, y + 3);
+    _ft->_canvas->drawString(valStr, 210, y);
 
     // Arrow
     _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_GREEN);
-    _ft->_canvas->drawString(">", 233, y + 3);
+    _ft->_canvas->drawString(">", 226, y);
 
     _ft->_canvas->setTextDatum(top_left);
 }
 
 // ============ STATUS PANEL ============
 void renderTriggerStatusPanel() {
-    int y = 96;
-    
-    // Panel border
-    _ft->_canvas->drawRoundRect(8, y, 224, 18, 4, COLOR_BORDER);
-    
+    int y = 113;
+
+    // Left: status panel
+    _ft->_canvas->drawRoundRect(8, y, 128, 20, 5, COLOR_BORDER);
+
     _ft->_canvas->setFont(&fonts::efontCN_10);
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(COLOR_TEXT);
-    
+
     // Trigger count
-    _ft->_canvas->drawString("Triggers:", 12, y + 4);
+    _ft->_canvas->drawString("Trig:", 14, y + 5);
     _ft->_canvas->setTextColor(COLOR_GREEN);
     char countStr[16];
     snprintf(countStr, sizeof(countStr), "%d", triggerMode.getTriggerCount());
-    _ft->_canvas->drawString(countStr, 70, y + 4);
-    
+    _ft->_canvas->drawString(countStr, 44, y + 5);
+
     // Status
     _ft->_canvas->setTextDatum(top_right);
     _ft->_canvas->setTextColor(triggerMode.isRunning() ? COLOR_GREEN : COLOR_TEXT);
-    _ft->_canvas->drawString(triggerMode.isRunning() ? "ACTIVE" : "IDLE", 225, y + 4);
-    
+    _ft->_canvas->drawString(triggerMode.isRunning() ? "ACTIVE" : "IDLE", 130, y + 5);
+
     _ft->_canvas->setTextDatum(top_left);
 }
 
 // ============ TEST BUTTON ============
 void renderTestButton() {
-    int y = 118;
+    int y = 113;
     bool isSelected = (triggerMode.editMode.selectedIndex == 4);
 
-    // Selected: filled highlight (AUTO SHOOT START/STOP style)
+    // Right of status panel — same bottom row (GEOPIX standard)
     if (isSelected) {
-        _ft->_canvas->fillRoundRect(60, y, 120, 14, 3, COLOR_HIGHLIGHT);
+        _ft->_canvas->fillRoundRect(142, y, 90, 20, 5, COLOR_HIGHLIGHT);
     } else {
-        _ft->_canvas->drawRoundRect(60, y, 120, 14, 3, COLOR_GREEN);
+        _ft->_canvas->drawRoundRect(142, y, 90, 20, 5, COLOR_GREEN);
     }
 
     _ft->_canvas->setFont(&fonts::efontCN_10);
     _ft->_canvas->setTextDatum(top_center);
     _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_GREEN);
-    _ft->_canvas->drawString("TEST TRIGGER", 120, y + 2);
+    _ft->_canvas->drawString("TEST TRIGGER", 187, y + 5);
     _ft->_canvas->setTextDatum(top_left);
 }
 
@@ -204,23 +209,28 @@ void renderBtRow(uint8_t index, const char* label, const char* value, int y) {
     bool isSelected = (triggerMode.editMode.btIndex == index);
 
     if (isSelected) {
-        _ft->_canvas->fillRoundRect(10, y - 2, 222, 16, 4, COLOR_BORDER);
+        _ft->_canvas->fillRoundRect(10, y - 1, 220, 15, 3, COLOR_BORDER);
     }
 
     _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_TEXT);
     _ft->_canvas->setTextDatum(top_left);
-    _ft->_canvas->drawString(label, ITEM_INDENT, y + 1);
+    _ft->_canvas->drawString(label, ITEM_INDENT, y);
 
     if (value && value[0]) {
         _ft->_canvas->setTextDatum(top_right);
         _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_GREEN);
-        _ft->_canvas->drawString(value, 225, y + 1);
-        _ft->_canvas->setTextDatum(top_left);
+        _ft->_canvas->drawString(value, 210, y);
     }
+
+    // Arrow
+    _ft->_canvas->setTextDatum(top_right);
+    _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_GREEN);
+    _ft->_canvas->drawString(">", 226, y);
+    _ft->_canvas->setTextDatum(top_left);
 }
 
 void renderBluetoothScreen() {
-    // Header
+    // Header (GEOPIX standard)
     _ft->_canvas->setFont(&fonts::efontCN_16);
     _ft->_canvas->setTextDatum(top_center);
     _ft->_canvas->setTextColor(COLOR_GREEN);
@@ -231,31 +241,35 @@ void renderBluetoothScreen() {
 
     CameraBrand brand = RemoteManager::getBrand();
 
+    // Settings panel (5 rows, 17px pitch)
+    _ft->_canvas->drawRoundRect(8, 22, 224, 88, 5, COLOR_BORDER);
     _ft->_canvas->setFont(&fonts::efontCN_12);
-    renderBtRow(0, "Enable", triggerMode.getBluetoothEnabled() ? "ON" : "OFF", 20);
-    renderBtRow(1, "Driver", RemoteManager::brandName(brand), 36);
-    renderBtRow(2, "PAIR CAMERA", "", 52);
-    renderBtRow(3, "TEST SHOT", "", 68);
-    renderBtRow(4, "FORGET", "", 84);
+    renderBtRow(0, "Enable", triggerMode.getBluetoothEnabled() ? "ON" : "OFF", 26);
+    renderBtRow(1, "Driver", RemoteManager::brandName(brand), 43);
+    renderBtRow(2, "PAIR CAMERA", "", 60);
+    renderBtRow(3, "TEST SHOT", "", 77);
+    renderBtRow(4, "FORGET", "", 94);
 
-    // Status panel: connection + paired info + last action
-    int y = 102;
-    _ft->_canvas->drawRoundRect(8, y, 224, 30, 4, COLOR_BORDER);
+    // Status panel: connection state left, last action right
+    int y = 113;
+    _ft->_canvas->drawRoundRect(8, y, 224, 20, 5, COLOR_BORDER);
     _ft->_canvas->setFont(&fonts::efontCN_10);
 
     if (brand == CameraBrand::None) {
         _ft->_canvas->setTextColor(COLOR_TEXT);
-        _ft->_canvas->drawString("Select a driver (SONY/CANON/NIKON)", 12, y + 4);
+        _ft->_canvas->drawString("Select driver: SONY/CANON/NIKON", 14, y + 5);
     } else {
         bool conn = RemoteManager::isConnected();
         bool paired = RemoteManager::hasPairedCamera();
         _ft->_canvas->setTextColor(conn ? COLOR_GREEN : (paired ? COLOR_BLUE : COLOR_RED));
-        _ft->_canvas->drawString(conn ? "Connected" : (paired ? "Paired (not connected)" : "Not paired"), 12, y + 4);
-    }
+        _ft->_canvas->drawString(conn ? "Connected" : (paired ? "Paired" : "Not paired"), 14, y + 5);
 
-    if (triggerMode.btStatus[0]) {
-        _ft->_canvas->setTextColor(COLOR_TEXT);
-        _ft->_canvas->drawString(triggerMode.btStatus, 12, y + 17);
+        if (triggerMode.btStatus[0]) {
+            _ft->_canvas->setTextDatum(top_right);
+            _ft->_canvas->setTextColor(COLOR_TEXT);
+            _ft->_canvas->drawString(triggerMode.btStatus, 226, y + 5);
+            _ft->_canvas->setTextDatum(top_left);
+        }
     }
 }
 
