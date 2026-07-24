@@ -81,7 +81,7 @@ static void renderInfoScreen() {
     _ft->_canvas->setTextColor(COLOR_TEXT);
     _ft->_canvas->drawString("Version:", 12, 70);
     _ft->_canvas->setTextColor(COLOR_GREEN);
-    _ft->_canvas->drawString("v1.1", 70, 70);
+    _ft->_canvas->drawString("v1.2", 70, 70);
 
     // ── Copyright ──
     _ft->_canvas->setFont(&fonts::efontCN_10);
