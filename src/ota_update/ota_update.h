@@ -12,7 +12,7 @@
 #pragma once
 #include <Arduino.h>
 
-#define GEOPIX_FW_VERSION "v1.2"
+#define GEOPIX_FW_VERSION "v1.3"
 #define OTA_GITHUB_API    "https://api.github.com/repos/JunFactorya04/01A/releases?per_page=6"
 #define OTA_MAX_RELEASES  6
 #define OTA_MAX_WIFI      8
