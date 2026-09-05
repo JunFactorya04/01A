@@ -304,6 +304,7 @@ void Timelapse::handleEncoderRotate(int delta) {
         if (newIndex >= 0 && newIndex <= 4) editMode.selectedIndex = newIndex;
     }
     else if (editMode.state == TimelapseEditMode::EDITING) {
+        int rawDelta = delta;   // keep the real magnitude for speed-sensitive fields
         if (delta > 0) delta = 1;
         else if (delta < 0) delta = -1;
 
@@ -311,9 +312,21 @@ void Timelapse::handleEncoderRotate(int delta) {
             // Direct entry -- identical to the original Interval/Total
             // Shots editing logic, plus the new Bulb Exposure field.
             switch (editMode.advanceIndex) {
-                case 0:  // Interval
-                    config.intervalMs += (delta * 100);
+                case 0: {  // Interval -- speed-sensitive: a fast spin moves
+                           // further, capped so a glitch/overshoot can't
+                           // jump too far. Interval spans 100ms-1hr and a
+                           // flat +-1 step (100ms/click) made large values
+                           // impractically slow to dial in. Timelapse's
+                           // Interval is a pure software timer with no
+                           // sensor/hardware timing coupling, so unlike
+                           // Auto Shoot's range fields this carries none of
+                           // that stability risk.
+                    int steps = rawDelta;
+                    if (steps > 30) steps = 30;
+                    if (steps < -30) steps = -30;
+                    config.intervalMs += (steps * 100);
                     break;
+                }
                 case 1:  // Total Shots
                     config.totalShots += delta;
                     break;
@@ -541,7 +554,11 @@ int Timelapse::getSelectedValue() {
 
 const char* Timelapse::getStatusString() {
     if (state.isExposing) return "BULB";
-    if (state.isRunning)  return "RUNNING";
+    // When Bulb is on, the gap between exposures is a rest period, not a
+    // normal shooting cycle -- labeling it "RUNNING" (the accurate label
+    // for the real non-bulb case) reads as if plain quick-pulse shooting
+    // and Bulb were both active/alternating, when only Bulb ever fires.
+    if (state.isRunning)  return config.bulbEnabled ? "REST" : "RUNNING";
     if (state.isPaused)   return "PAUSED";
     if (config.totalShots != 0 && state.shotCount >= config.totalShots && state.shotCount > 0)
         return "DONE";

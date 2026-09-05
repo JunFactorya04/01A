@@ -230,6 +230,7 @@ void renderTimelapseStatusPanel() {
 
     uint16_t statusColor = COLOR_TEXT;
     if (strcmp(status, "RUNNING") == 0) statusColor = COLOR_GREEN;
+    else if (strcmp(status, "REST") == 0) statusColor = COLOR_GREEN;
     else if (strcmp(status, "PAUSED") == 0) statusColor = COLOR_YELLOW;
     else if (strcmp(status, "BULB") == 0) statusColor = COLOR_ORANGE;
     else if (strcmp(status, "DONE") == 0) statusColor = COLOR_GREEN;
@@ -246,7 +247,11 @@ void renderTimelapseStatusPanel() {
         snprintf(cdBuf, sizeof(cdBuf), "%lus", (unsigned long)((ms + 999) / 1000));
     } else if (timelapse.state.isRunning) {
         unsigned long ms = timelapse.getTimeUntilNextShot();
-        snprintf(cdBuf, sizeof(cdBuf), "next %lus", (unsigned long)((ms + 999) / 1000));
+        // "rest Ns" while Bulb is on (waiting out the post-exposure rest),
+        // "next Ns" for the real non-bulb continuous-shooting case.
+        snprintf(cdBuf, sizeof(cdBuf), "%s %lus",
+                 timelapse.config.bulbEnabled ? "rest" : "next",
+                 (unsigned long)((ms + 999) / 1000));
     } else {
         snprintf(cdBuf, sizeof(cdBuf), "--");
     }
