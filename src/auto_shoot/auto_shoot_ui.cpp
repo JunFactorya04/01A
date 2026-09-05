@@ -4,6 +4,7 @@
  */
 
 #include "auto_shoot.h"
+#include "tf_luna.h"   // TFLUNA_MAX_DISTANCE_M — scale for the live range-zone bar
 #include "../factory_test/factory_test.h"
 #include "../common/ui_theme.h"   // themed palette
 #include "../sleep_week/sleep_week_ui.h"
@@ -98,7 +99,7 @@ void renderAutoShootSettingsPanel() {
     _ft->_canvas->setFont(&fonts::efontCN_16);
     _ft->_canvas->setTextDatum(top_left);
 
-    renderAutoShootSettingsItem(0, "Range", autoShoot.config.rangeMin, " m");
+    renderAutoShootSettingsItem(0, "Range Min", autoShoot.config.rangeMin, " m");
     renderAutoShootSettingsItem(1, "Range Max", autoShoot.config.rangeMax, " m");
     renderAutoShootSettingsItem(2, "Burst", (float)autoShoot.config.burstShots, "");
     renderAutoShootSettingsItem(3, "Cool", (float)autoShoot.config.cooldownMs, " ms");
@@ -148,7 +149,7 @@ void renderAutoShootSettingsItem(uint8_t index, const char* label, float value, 
     _ft->_canvas->setTextDatum(top_left);
 }
 
-// ============ STATUS PANEL ============
+// ============ STATUS PANEL (+ live range-zone bar) ============
 void renderAutoShootStatusPanel() {
     if (!_ft || !_ft->_canvas) return;
 
@@ -159,23 +160,51 @@ void renderAutoShootStatusPanel() {
     const char* status = autoShoot.getStatusString();
     if (!status) status = "IDLE";
 
-    // One line: TF distance (left) + status (right)
+    // Row 1: TF distance (left) + status (right)
     _ft->_canvas->setFont(&fonts::efontCN_10);
     _ft->_canvas->setTextDatum(top_left);
 
     char distStr[32];
     snprintf(distStr, sizeof(distStr), "TF:%.1fm", autoShoot.state.currentDistance);
     _ft->_canvas->setTextColor(autoShoot.state.objectDetected ? COLOR_GREEN : COLOR_TEXT);
-    _ft->_canvas->drawString(distStr, 14, y + 6);
+    _ft->_canvas->drawString(distStr, 14, y + 1);
 
     uint16_t color = COLOR_GREEN;
     if (strcmp(status, "IDLE") == 0) color = COLOR_TEXT;
     if (strcmp(status, "DETECTING") == 0) color = COLOR_YELLOW;
     _ft->_canvas->setTextDatum(top_right);
     _ft->_canvas->setTextColor(color);
-    _ft->_canvas->drawString(status, 108, y + 6);
-
+    _ft->_canvas->drawString(status, 108, y + 1);
     _ft->_canvas->setTextDatum(top_left);
+
+    // Row 2: live zone bar. Fixed 0..TFLUNA_MAX_DISTANCE_M scale (the
+    // sensor's actual full range, NOT just the configured Range Max) so the
+    // [Range Min, Range Max] band is shown in its real physical position —
+    // this is what makes it obvious at a glance when a static backdrop
+    // sits inside the configured zone (the classic false-trigger cause),
+    // instead of having to mentally compare two raw numbers.
+    const int barX = 12, barW = 98, barY = y + 13, barH = 5;
+    const float span = TFLUNA_MAX_DISTANCE_M;
+
+    auto distToX = [&](float d) -> int {
+        if (d < 0.0f) d = 0.0f;
+        if (d > span) d = span;
+        return barX + (int)((d / span) * (float)(barW - 2)) + 1;
+    };
+
+    _ft->_canvas->drawRect(barX, barY, barW, barH, COLOR_BORDER);
+
+    int zoneX0 = distToX(autoShoot.config.rangeMin);
+    int zoneX1 = distToX(autoShoot.config.rangeMax);
+    if (zoneX1 > zoneX0) {
+        _ft->_canvas->fillRect(zoneX0, barY + 1, zoneX1 - zoneX0, barH - 2, COLOR_HIGHLIGHT);
+    }
+
+    // Live reading marker — green when it counts as a detection, red when
+    // it's outside the configured zone (incl. no return at all).
+    int markX = distToX(autoShoot.state.currentDistance);
+    uint16_t markColor = autoShoot.state.objectDetected ? COLOR_GREEN : COLOR_RED;
+    _ft->_canvas->drawFastVLine(markX, barY - 1, barH + 2, markColor);
 }
 
 // ============ CONTROL BUTTONS ============
