@@ -164,13 +164,25 @@ screen's calculator accounts for exposure time rather than understating the real
 `stop()`/`pause()` force-release a mid-exposure hold
 (`forceReleaseBulbIfExposing()`) so the camera's shutter is never left open indefinitely just
 because the sequence was interrupted. The BLE camera-remote channel has no held/bulb command
-(`CameraDriver` only exposes one-shot `trigger()`) — for BLE-only setups the bulb path fires a
-normal single shot after the hold completes rather than actually holding that camera's shutter;
-real bulb timing only works through the physical G1/G2 cable.
+(`CameraDriver` only exposes one-shot `trigger()`) and is **skipped entirely** for the whole bulb
+sequence (`endBulbExposure()` deliberately does not call `fireBluetoothIfEnabled()`) — an earlier
+version fired it anyway after the hold released, which landed as a second, uncontrolled shot
+right on top of the held exposure (two trigger paths firing "in parallel" on the same sequence).
+Bulb mode is exclusive to the physical G1/G2 hold.
 
 The status box's realtime countdown ("next Ns" / "Bulb Ns") + fill progress bar finally puts the
 `getTimeUntilNextShot()` getter to use — it existed in the original code but was never rendered
 anywhere before this.
+
+**Bootstrap-from-infinite gotcha**: editing Video Length or Video FPS on MAIN while
+`totalShots == 0` (infinite, the default) must NOT solve a new Interval the normal way. The
+normal path bootstraps "current duration" from a degenerate one-shot assumption
+(`perShotMs() * 1`), and solving Interval to stretch that tiny duration across the much larger
+shot count FPS/VideoLength implies produces absurdly short intervals (default 5s Interval treated
+as "1 shot", stretched to fit a 1s@30fps video's 30 shots -> ~166ms Interval — this was a real
+reported bug, "fires 1 shot per second" with no real spacing). The fix: when `totalShots` was 0
+at the start of the edit, leave `intervalMs` untouched and just set `totalShots` directly;
+Duration then follows naturally instead of being derived from an ungrounded baseline.
 
 ### Power-on sequence is brownout-sensitive
 
