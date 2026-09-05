@@ -1,0 +1,12 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "PlatformIO Build Check",
+			"type": "shell",
+			"command": "C:\\Users\\nt.huan\\.platformio\\penv\\Scripts\\platformio.exe run",
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}
