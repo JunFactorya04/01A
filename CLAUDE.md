@@ -137,6 +137,14 @@ sensor.
 display init runs in this same fragile window — avoid adding current-hungry peripheral
 activity there; prefer initializing it lazily inside the mode that actually needs it.
 
+That 2s button hold also has a side effect relied on elsewhere: it gives TF-Luna (same power
+rail) real wall-clock time to finish its own physical power-on settling before anything ever
+queries it. A boot that skips the hold — VIN2 direct power, or an RTC scheduled wake — doesn't get
+that for free, so `main.cpp` passes `bootLogoPlay(canvas, extraHoldMs)` an extra ~2000ms
+(added to the logo's already-static hold phase, so it's invisible as a "pause") whenever
+`ft._manual_power_on` is false, closing the gap. No TF-Luna/I2C calls involved — pure elapsed
+time — so this doesn't carry the brownout/instability risk that touching the sensor at boot did.
+
 ### Sleep & Week scheduler runs globally, not just in its own mode
 
 `sleepWeekScheduler.update()` is ticked every frame from `view_update()` (main menu) as well as
@@ -148,6 +156,24 @@ scheduler class itself has no hardware dependency. On a scheduled RTC wake,
 `_scheduler_boot_resume()` auto-enters AUTO_SHOOT or TIMELAPSE (per configured mode) and arms a
 5s "AUTO START" countdown popup (`_scheduler_autostart_pending`) consumed inside that mode's own
 loop; a manual power-on (`_manual_power_on`) always goes to the main menu instead.
+
+### DisplayMode lives on, but its launcher slot is now MULTI BOX (placeholder)
+
+The old standalone DISPLAY mode's launcher slot is now called MULTI BOX
+(`src/factory_test/factory_test_multi_box.cpp`) and is an intentionally empty placeholder
+("Coming soon", exits on any press) awaiting design instructions — don't assume it's dead code to
+clean up.
+
+The actual `DisplayMode` class, `DisplayModeConfig`, `DisplayPowerSave` engine, and
+`display_mode_ui.cpp`'s `renderDisplayUI()` are **completely unchanged** and still do everything
+they always did (boot-time apply in `view.cpp`, power-save ticking at the main menu). Only the
+*entry point* moved: brightness / power save / theme / rotation are now edited from **SETTING**
+mode's "Display" row (`SettingEditMode::Screen::DISPLAY_SETTINGS` — named to avoid colliding with
+Arduino.h's `#define DISPLAY 0x1`, which silently breaks enum parsing if reused). `Setting`'s
+input handlers forward straight to `displayMode.handleEncoderRotate()`/`handleButtonPress()` when
+that screen is active, and `renderSettingUI()` calls `renderDisplayUI()` as-is — so if you need to
+change brightness/power-save/theme/rotation behavior, edit `display_mode.cpp`/`display_mode_ui.cpp`
+exactly as before; only navigating *to* that screen goes through Setting now.
 
 ### UI convention ("GEOPIX UI STANDARD")
 
