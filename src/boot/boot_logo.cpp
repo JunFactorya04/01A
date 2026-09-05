@@ -60,15 +60,15 @@ static void fade(LGFX_Sprite* cv, const std::vector<SparsePx>& px,
 }
 
 // ============ PUBLIC ============
-void bootLogoPlay(LGFX_Sprite* canvas) {
+void bootLogoPlay(LGFX_Sprite* canvas, unsigned long extraHoldMs) {
     if (!canvas) return;
 
     std::vector<SparsePx> logo;
     buildSparse(geopix_logo_data, GEOPIX_LOGO_W, GEOPIX_LOGO_H, logo);
 
-    fade(canvas, logo, 0, 255, 600);   // 1. fade in
-    delay(1400);                       // 2. hold  (2s on screen total)
-    fade(canvas, logo, 255, 0, 500);   // 3. fade out
+    fade(canvas, logo, 0, 255, 600);            // 1. fade in
+    delay(1400 + extraHoldMs);                  // 2. hold (2s on screen, +extra on a cold boot)
+    fade(canvas, logo, 255, 0, 500);            // 3. fade out
 
     // 4. Clear -> caller switches straight to Main UI
     canvas->fillScreen(TFT_BLACK);

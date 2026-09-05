@@ -24,7 +24,18 @@ void setup()
 
     // GEOPIX boot logo: logo fade in -> text fade in -> hold -> fade out,
     // then fall straight through to the main UI (no key wait).
-    bootLogoPlay(ft._canvas);
+    //
+    // Extra hold on a "cold" boot (VIN2 direct power, or an RTC scheduled
+    // wake) that skipped the manual power button's ~2s hold: TF-Luna is on
+    // the same power rail and needs real wall-clock time since power was
+    // applied to finish its own physical power-on settling, independent of
+    // any firmware call. The button-hold path already gets that time for
+    // free; this closes the gap for the paths that don't, so the sensor
+    // isn't queried (in AutoShoot::init(), on mode entry) before it's
+    // actually ready — instead of a bare delay() that would just look like
+    // a stall, it's spent extending the logo's hold, which is already
+    // static and expected to sit there a moment.
+    bootLogoPlay(ft._canvas, ft._manual_power_on ? 0 : 2000);
 
     view_create(&ft);
 
