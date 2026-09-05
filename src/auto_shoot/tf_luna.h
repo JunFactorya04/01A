@@ -6,10 +6,13 @@
  * I2C ONLY — DinMeter Port A: SDA=GPIO13, SCL=GPIO15, addr=0x10, bus=Wire1
  * (RTC BM8563 uses Wire/bus0 on GPIO11/12 — separate bus, no conflict)
  *
- * Register map (per Benewake datasheet / budryerson TFLuna-I2C):
+ * Register map (per Benewake datasheet / budryerson TFLuna-I2C — verified
+ * against the official Benewake I2C register table, which uses the exact
+ * same addresses/values already relied on below for 0x21):
  *   0x00 DIST_LO   0x01 DIST_HI   (unit: cm)
  *   0x02 FLUX_LO   0x03 FLUX_HI   (signal strength)
  *   0x04 TEMP_LO   0x05 TEMP_HI   (unit: 0.01 C)
+ *   0x26 FPS_LO    0x27 FPS_HI    (frame rate, Hz, 16-bit little-endian)
  *
  * Flow: TF-Luna I2C -> TFLuna API -> AutoShoot range detection
  *       -> existing Trigger Mode -> G1/G2 output
@@ -22,11 +25,21 @@
 #define TFLUNA_MAX_DISTANCE_M 8.0f   // sensor max range (meters), clamp above this
 #define TFLUNA_MAX_FAILS      25     // consecutive I2C failures before driver re-init
 
+// Target sample rate (Hz). Sensor default is 100Hz; datasheet max is 250Hz.
+// Kept below the max on purpose: higher frame rates trade off per-sample
+// integration time (more read-to-read noise), and this project has already
+// been burned once by an over-eager sensor-timing change (see warmUp()
+// history) — 200Hz still roughly halves the polling period (10ms -> 5ms)
+// without pushing to the most aggressive setting on the first rollout.
+#define TFLUNA_TARGET_FPS_HZ  200
+
 // TF-Luna I2C registers
 #define TFL_REG_DIST_LO    0x00
 #define TFL_REG_FLUX_LO    0x02
 #define TFL_REG_SOFT_RESET 0x21   // write 0x02 -> sensor reboots (~500ms)
 #define TFL_REG_ENABLE     0x25   // write 0 = disable (sleep), 1 = enable
+#define TFL_REG_FPS_LO     0x26   // frame rate, low byte  (16-bit LE, Hz)
+#define TFL_REG_FPS_HI     0x27   // frame rate, high byte
 
 // ============ TF-LUNA API ============
 class TFLuna {
@@ -76,6 +89,9 @@ public:
     /** @brief millis() timestamp of the last successful read. */
     unsigned long getLastUpdateTime() const { return _lastUpdateTime; }
 
+    /** @brief Confirmed sensor frame rate (Hz) after the last begin(), 0 if unknown/unconfirmed. */
+    uint16_t getFrameRateHz() const { return _confirmedFpsHz; }
+
 private:
     float _distance_m = 0.0f;
     uint16_t _strength = 0;
@@ -85,12 +101,20 @@ private:
     bool _started = false;                // begin() has run at least once
     unsigned long _lastRecoverTime = 0;   // rate-limit bus recovery
     unsigned long _lastAttemptTime = 0;   // rate-limit retries while failing
+    uint8_t _samplePeriodMs = 10;         // poll pacing; derived from confirmed frame rate
+    uint16_t _confirmedFpsHz = 0;         // 0 = readback failed, still paced at the 100Hz-safe default
 
     // Raw I2C register read (6 bytes: dist, flux, temp)
     bool readRegisters(uint16_t &dist_cm, uint16_t &strength);
 
     // Reboot the sensor itself (reg 0x21 = 0x02) when its I2C engine hangs
     void softResetSensor();
+
+    // Configure the sensor's frame rate (0x26/0x27), read it back to confirm,
+    // and derive _samplePeriodMs from whatever the sensor actually accepted.
+    // Never blocks/retries — a failure here just leaves the 100Hz-safe
+    // fallback pacing in place, it can't hang the driver.
+    void configureFrameRate();
 };
 
 // Global instance
