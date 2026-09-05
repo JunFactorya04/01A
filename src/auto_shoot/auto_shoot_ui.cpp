@@ -1,6 +1,14 @@
 /**
  * @file auto_shoot_ui.cpp
- * @brief Auto Shoot UI rendering with LovyanGFX (FIXED)
+ * @brief Auto Shoot UI rendering with LovyanGFX
+ *
+ * Two screens, same pattern as TriggerMode's MAIN/BLUETOOTH split:
+ *   MAIN     — Burst, Cooldown, Advance (opens the submenu below), START/STOP.
+ *              Pure mode by default: no range restriction, freed-up space
+ *              used for a bigger live status readout.
+ *   ADVANCE  — Range Filter ON/OFF, Range Min, Range Max. Turning the
+ *              filter ON restores the exact original [Min, Max] band-pass
+ *              behavior and its zone-bar visualization.
  */
 
 #include "auto_shoot.h"
@@ -13,12 +21,17 @@
 
 extern FactoryTest* _ft;
 
-// ============ FORWARD DECLARATIONS (FIX COMPILER ERROR) ============
+// ============ FORWARD DECLARATIONS ============
 void renderAutoShootHeader();
 void renderAutoShootSettingsPanel();
-void renderAutoShootSettingsItem(uint8_t index, const char* label, float value, const char* unit);
+void renderAutoShootSettingsItem(uint8_t index, const char* label, int value, const char* unit);
+void renderAutoShootAdvanceRow(int y);
+void renderAutoShootLiveInfo();
 void renderAutoShootStatusPanel();
 void renderAutoShootControlButtons();
+void renderAutoShootAdvanceScreen();
+void renderAdvanceItem(uint8_t index, const char* label, const char* valueStr);
+static void renderZoneBar(int barX, int barY, int barW, int barH);
 
 // ============ UI CONSTANTS ============
 #define SCREEN_WIDTH 240
@@ -66,10 +79,15 @@ void renderAutoShootUI() {
 
     _ft->_canvas->fillScreen(COLOR_BG);
 
-    renderAutoShootHeader();
-    renderAutoShootSettingsPanel();
-    renderAutoShootStatusPanel();
-    renderAutoShootControlButtons();
+    if (autoShoot.inAdvanceScreen()) {
+        renderAutoShootAdvanceScreen();
+    } else {
+        renderAutoShootHeader();
+        renderAutoShootSettingsPanel();
+        renderAutoShootLiveInfo();
+        renderAutoShootStatusPanel();
+        renderAutoShootControlButtons();
+    }
 
     if (schedulerPopupActive()) schedulerPopupDraw();
 
@@ -107,27 +125,27 @@ void renderAutoShootHeader() {
     _ft->_canvas->setTextDatum(top_left);
 }
 
-// ============ SETTINGS PANEL ============
+// ============ SETTINGS PANEL (MAIN: Burst / Cooldown / Advance) ============
 void renderAutoShootSettingsPanel() {
     if (!_ft || !_ft->_canvas) return;
 
-    _ft->_canvas->drawRoundRect(8, 22, 224, 88, 5, COLOR_BORDER);
+    // Only 3 rows now (was 4) -- Range Min/Max moved into the Advance
+    // submenu, so the panel is shorter, freeing space below for
+    // renderAutoShootLiveInfo().
+    _ft->_canvas->drawRoundRect(8, 22, 224, 70, 5, COLOR_BORDER);
 
     _ft->_canvas->setFont(&fonts::efontCN_16);
     _ft->_canvas->setTextDatum(top_left);
 
-    renderAutoShootSettingsItem(0, "Range Min", autoShoot.config.rangeMin, " m");
-    renderAutoShootSettingsItem(1, "Range Max", autoShoot.config.rangeMax, " m");
-    renderAutoShootSettingsItem(2, "Burst", (float)autoShoot.config.burstShots, "");
-    renderAutoShootSettingsItem(3, "Cool", (float)autoShoot.config.cooldownMs, " ms");
+    renderAutoShootSettingsItem(0, "Burst", autoShoot.config.burstShots, "");
+    renderAutoShootSettingsItem(1, "Cooldown", autoShoot.config.cooldownMs, " ms");
+    renderAutoShootAdvanceRow(ITEM_Y_START + ITEM_HEIGHT * 2);
 }
 
-// ============ SETTINGS ITEM ============
-void renderAutoShootSettingsItem(uint8_t index, const char* label, float value, const char* unit) {
+// ============ SETTINGS ITEM (integer values only: Burst, Cooldown) ============
+void renderAutoShootSettingsItem(uint8_t index, const char* label, int value, const char* unit) {
     if (!_ft || !_ft->_canvas) return;
-
     if (!unit) unit = "";
-    if (!isfinite(value)) value = 0;
 
     int y = ITEM_Y_START + (index * ITEM_HEIGHT);
 
@@ -141,23 +159,15 @@ void renderAutoShootSettingsItem(uint8_t index, const char* label, float value, 
 
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_TEXT);
-
     _ft->_canvas->drawString(label, ITEM_INDENT + 6, y + 1);
 
     char valueStr[32];
-
-    if (index == 2 || index == 3) {
-        snprintf(valueStr, sizeof(valueStr), "%d%s", (int)value, unit);
-    } else {
-        snprintf(valueStr, sizeof(valueStr), "%.1f%s", value, unit);
-    }
+    snprintf(valueStr, sizeof(valueStr), "%d%s", value, unit);
 
     _ft->_canvas->setTextDatum(top_right);
-
     if (isEditing && blinkState) {
         _ft->_canvas->setTextColor(COLOR_BG);
     }
-
     _ft->_canvas->drawString(valueStr, 210, y + 1);
 
     _ft->_canvas->setTextColor(COLOR_GREEN);
@@ -166,7 +176,55 @@ void renderAutoShootSettingsItem(uint8_t index, const char* label, float value, 
     _ft->_canvas->setTextDatum(top_left);
 }
 
-// ============ STATUS PANEL (+ live range-zone bar) ============
+// ============ ADVANCE ROW (on MAIN screen — opens the submenu) ============
+void renderAutoShootAdvanceRow(int y) {
+    if (!_ft || !_ft->_canvas) return;
+
+    bool isSelected = (autoShoot.editMode.selectedIndex == 2 &&
+                        autoShoot.editMode.state == EditMode::SELECTING);
+
+    if (isSelected) {
+        _ft->_canvas->fillRoundRect(10, y - 1, 220, 18, 3, COLOR_BORDER);
+    }
+
+    _ft->_canvas->setTextDatum(top_left);
+    _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_TEXT);
+    _ft->_canvas->drawString("Advance", ITEM_INDENT + 6, y + 1);
+
+    bool filtered = autoShoot.config.filterEnabled;
+    _ft->_canvas->setTextDatum(top_right);
+    _ft->_canvas->setTextColor(isSelected ? COLOR_BG : (filtered ? COLOR_GREEN : COLOR_TEXT));
+    _ft->_canvas->drawString(filtered ? "Filter ON" : "Filter OFF", 210, y + 1);
+
+    _ft->_canvas->setTextColor(isSelected ? COLOR_BG : COLOR_GREEN);
+    _ft->_canvas->drawString(">", 225, y + 1);
+
+    _ft->_canvas->setTextDatum(top_left);
+}
+
+// ============ LIVE INFO (freed-up space: mode + zone bar) ============
+void renderAutoShootLiveInfo() {
+    if (!_ft || !_ft->_canvas) return;
+
+    int y = 94;
+
+    _ft->_canvas->setFont(&fonts::efontCN_10);
+    _ft->_canvas->setTextDatum(top_left);
+    _ft->_canvas->setTextColor(COLOR_TEXT);
+    _ft->_canvas->drawString("Mode:", 12, y);
+
+    bool filtered = autoShoot.config.filterEnabled;
+    _ft->_canvas->setTextColor(filtered ? COLOR_GREEN : COLOR_YELLOW);
+    _ft->_canvas->drawString(filtered ? "FILTERED (zone)" : "PURE (full range)", 46, y);
+
+    // Same bar the Advance screen uses (see renderZoneBar) -- in pure mode
+    // it just shows the live marker with no highlighted band, since no
+    // zone applies; in filtered mode it shows the configured [Min, Max]
+    // band even without opening Advance.
+    renderZoneBar(10, y + 12, 220, 6);
+}
+
+// ============ STATUS PANEL ============
 void renderAutoShootStatusPanel() {
     if (!_ft || !_ft->_canvas) return;
 
@@ -177,51 +235,22 @@ void renderAutoShootStatusPanel() {
     const char* status = autoShoot.getStatusString();
     if (!status) status = "IDLE";
 
-    // Row 1: TF distance (left) + status (right)
     _ft->_canvas->setFont(&fonts::efontCN_10);
     _ft->_canvas->setTextDatum(top_left);
 
     char distStr[32];
     snprintf(distStr, sizeof(distStr), "TF:%.1fm", autoShoot.state.currentDistance);
     _ft->_canvas->setTextColor(autoShoot.state.objectDetected ? COLOR_GREEN : COLOR_TEXT);
-    _ft->_canvas->drawString(distStr, 14, y + 1);
+    _ft->_canvas->drawString(distStr, 14, y + 6);
 
     uint16_t color = COLOR_GREEN;
     if (strcmp(status, "IDLE") == 0) color = COLOR_TEXT;
     if (strcmp(status, "DETECTING") == 0) color = COLOR_YELLOW;
     _ft->_canvas->setTextDatum(top_right);
     _ft->_canvas->setTextColor(color);
-    _ft->_canvas->drawString(status, 108, y + 1);
+    _ft->_canvas->drawString(status, 108, y + 6);
+
     _ft->_canvas->setTextDatum(top_left);
-
-    // Row 2: live zone bar. Fixed 0..TFLUNA_MAX_DISTANCE_M scale (the
-    // sensor's actual full range, NOT just the configured Range Max) so the
-    // [Range Min, Range Max] band is shown in its real physical position —
-    // this is what makes it obvious at a glance when a static backdrop
-    // sits inside the configured zone (the classic false-trigger cause),
-    // instead of having to mentally compare two raw numbers.
-    const int barX = 12, barW = 98, barY = y + 13, barH = 5;
-    const float span = TFLUNA_MAX_DISTANCE_M;
-
-    auto distToX = [&](float d) -> int {
-        if (d < 0.0f) d = 0.0f;
-        if (d > span) d = span;
-        return barX + (int)((d / span) * (float)(barW - 2)) + 1;
-    };
-
-    _ft->_canvas->drawRect(barX, barY, barW, barH, COLOR_BORDER);
-
-    int zoneX0 = distToX(autoShoot.config.rangeMin);
-    int zoneX1 = distToX(autoShoot.config.rangeMax);
-    if (zoneX1 > zoneX0) {
-        _ft->_canvas->fillRect(zoneX0, barY + 1, zoneX1 - zoneX0, barH - 2, COLOR_HIGHLIGHT);
-    }
-
-    // Live reading marker — green when it counts as a detection, red when
-    // it's outside the configured zone (incl. no return at all).
-    int markX = distToX(autoShoot.state.currentDistance);
-    uint16_t markColor = autoShoot.state.objectDetected ? COLOR_GREEN : COLOR_RED;
-    _ft->_canvas->drawFastVLine(markX, barY - 1, barH + 2, markColor);
 }
 
 // ============ CONTROL BUTTONS ============
@@ -233,8 +262,8 @@ void renderAutoShootControlButtons() {
     _ft->_canvas->setFont(&fonts::efontCN_10);
     _ft->_canvas->setTextDatum(top_center);
 
-    bool startSel = (autoShoot.editMode.selectedIndex == 4 && autoShoot.editMode.state == EditMode::SELECTING);
-    bool stopSel  = (autoShoot.editMode.selectedIndex == 5 && autoShoot.editMode.state == EditMode::SELECTING);
+    bool startSel = (autoShoot.editMode.selectedIndex == 3 && autoShoot.editMode.state == EditMode::SELECTING);
+    bool stopSel  = (autoShoot.editMode.selectedIndex == 4 && autoShoot.editMode.state == EditMode::SELECTING);
 
     // START button
     _ft->_canvas->drawRoundRect(122, btnY, 52, 20, 5,
@@ -259,8 +288,125 @@ void renderAutoShootControlButtons() {
     _ft->_canvas->drawString("STOP", 206, btnY + 6);
 }
 
+// ============ LIVE ZONE BAR (shared by MAIN's live info + ADVANCE) ============
+// Fixed 0..TFLUNA_MAX_DISTANCE_M scale — the sensor's real max range, NOT
+// just the configured Range Max — so the [Range Min, Range Max] band is
+// shown in its true physical position. Highlighted zone only drawn when
+// the filter is enabled (in pure mode there IS no zone restriction).
+static void renderZoneBar(int barX, int barY, int barW, int barH) {
+    if (!_ft || !_ft->_canvas) return;
+    const float span = TFLUNA_MAX_DISTANCE_M;
+
+    auto distToX = [&](float d) -> int {
+        if (d < 0.0f) d = 0.0f;
+        if (d > span) d = span;
+        return barX + (int)((d / span) * (float)(barW - 2)) + 1;
+    };
+
+    _ft->_canvas->drawRect(barX, barY, barW, barH, COLOR_BORDER);
+
+    if (autoShoot.config.filterEnabled) {
+        int zoneX0 = distToX(autoShoot.config.rangeMin);
+        int zoneX1 = distToX(autoShoot.config.rangeMax);
+        if (zoneX1 > zoneX0) {
+            _ft->_canvas->fillRect(zoneX0, barY + 1, zoneX1 - zoneX0, barH - 2, COLOR_HIGHLIGHT);
+        }
+    }
+
+    // Live reading marker — green when it counts as a detection, red when
+    // it doesn't (outside the zone, or no return at all).
+    int markX = distToX(autoShoot.state.currentDistance);
+    uint16_t markColor = autoShoot.state.objectDetected ? COLOR_GREEN : COLOR_RED;
+    _ft->_canvas->drawFastVLine(markX, barY - 1, barH + 2, markColor);
+}
+
+// ============ ADVANCE SCREEN (Range Filter submenu) ============
+void renderAutoShootAdvanceScreen() {
+    if (!_ft || !_ft->_canvas) return;
+
+    _ft->_canvas->setFont(&fonts::efontCN_16);
+    _ft->_canvas->setTextDatum(top_center);
+    _ft->_canvas->setTextColor(COLOR_GREEN);
+    _ft->_canvas->drawString("ADVANCE", SCREEN_WIDTH / 2, 2);
+    _ft->_canvas->setTextDatum(top_left);
+    _ft->_canvas->setTextColor(COLOR_TEXT);
+    _ft->_canvas->drawString("<", 5, 2);
+
+    _ft->_canvas->drawRoundRect(8, 22, 224, 70, 5, COLOR_BORDER);
+    _ft->_canvas->setFont(&fonts::efontCN_16);
+
+    bool filtered = autoShoot.config.filterEnabled;
+
+    // Row 0: Range Filter ON/OFF
+    {
+        int y = ITEM_Y_START;
+        bool isSel = (autoShoot.editMode.advanceIndex == 0);
+        if (isSel) _ft->_canvas->fillRoundRect(10, y - 1, 220, 18, 3, COLOR_BORDER);
+        _ft->_canvas->setTextDatum(top_left);
+        _ft->_canvas->setTextColor(isSel ? COLOR_BG : COLOR_TEXT);
+        _ft->_canvas->drawString("Range Filter", ITEM_INDENT + 6, y + 1);
+        _ft->_canvas->setTextDatum(top_right);
+        _ft->_canvas->setTextColor(isSel ? COLOR_BG : (filtered ? COLOR_GREEN : COLOR_RED));
+        _ft->_canvas->drawString(filtered ? "ON" : "OFF", 210, y + 1);
+        _ft->_canvas->setTextColor(isSel ? COLOR_BG : COLOR_GREEN);
+        _ft->_canvas->drawString(">", 225, y + 1);
+        _ft->_canvas->setTextDatum(top_left);
+    }
+
+    // Row 1/2: Range Min / Range Max — same fields, same editing logic as
+    // before the Advance submenu existed, just relocated here.
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%.1f m", autoShoot.config.rangeMin);
+    renderAdvanceItem(1, "Range Min", buf);
+    snprintf(buf, sizeof(buf), "%.1f m", autoShoot.config.rangeMax);
+    renderAdvanceItem(2, "Range Max", buf);
+
+    // Live zone bar right under the panel — see it update as you drag
+    // Range Min/Max, exactly like the MAIN screen's copy.
+    renderZoneBar(10, 96, 220, 8);
+
+    _ft->_canvas->setFont(&fonts::efontCN_10);
+    _ft->_canvas->setTextDatum(top_left);
+    _ft->_canvas->setTextColor(COLOR_BORDER);
+    _ft->_canvas->drawString(filtered ? "Filter ON: only [Min,Max] counts"
+                                       : "Filter OFF: Min/Max have no effect",
+                              12, 108);
+}
+
+void renderAdvanceItem(uint8_t index, const char* label, const char* valueStr) {
+    if (!_ft || !_ft->_canvas) return;
+
+    int y = ITEM_Y_START + (index * ITEM_HEIGHT);
+    bool isSel  = (autoShoot.editMode.advanceIndex == index);
+    bool isEdit = (autoShoot.editMode.state == EditMode::EDITING && isSel);
+
+    if (isSel) {
+        _ft->_canvas->fillRoundRect(10, y - 1, 220, 18, 3,
+            isEdit ? COLOR_HIGHLIGHT : COLOR_BORDER);
+    }
+
+    _ft->_canvas->setTextDatum(top_left);
+    _ft->_canvas->setTextColor(isSel ? COLOR_BG : COLOR_TEXT);
+    _ft->_canvas->drawString(label, ITEM_INDENT + 6, y + 1);
+
+    _ft->_canvas->setTextDatum(top_right);
+    if (isEdit && blinkState) {
+        _ft->_canvas->setTextColor(COLOR_BG);
+    } else {
+        _ft->_canvas->setTextColor(isSel ? COLOR_BG : COLOR_GREEN);
+    }
+    _ft->_canvas->drawString(valueStr, 210, y + 1);
+
+    _ft->_canvas->setTextColor(isSel ? COLOR_BG : COLOR_GREEN);
+    _ft->_canvas->drawString(">", 225, y + 1);
+
+    _ft->_canvas->setTextDatum(top_left);
+}
+
 // ============ INIT ============
 void initAutoShootUI() {
     autoShoot.editMode.state = EditMode::SELECTING;
+    autoShoot.editMode.screen = EditMode::MAIN;
     autoShoot.editMode.selectedIndex = 0;
+    autoShoot.editMode.advanceIndex = 0;
 }

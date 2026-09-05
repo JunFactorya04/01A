@@ -58,10 +58,11 @@ void AutoShoot::loadConfig() {
     Preferences prefs;
     prefs.begin("autoShoot");
 
+    config.filterEnabled = prefs.getBool("filterEn", false);
     config.rangeMin = prefs.getFloat("minR", 0.1f);
     config.rangeMax = prefs.getFloat("maxR", 8.0f);
     config.burstShots = prefs.getInt("burst", 1);
-    config.cooldownMs = prefs.getInt("cooldown", 500);
+    config.cooldownMs = prefs.getInt("cooldown", 0);
 
     prefs.end();
 
@@ -72,6 +73,7 @@ void AutoShoot::saveConfig() {
     Preferences prefs;
     prefs.begin("autoShoot");
 
+    prefs.putBool("filterEn", config.filterEnabled);
     prefs.putFloat("minR", config.rangeMin);
     prefs.putFloat("maxR", config.rangeMax);
     prefs.putInt("burst", config.burstShots);
@@ -127,8 +129,14 @@ void AutoShoot::updateSensorData() {
     state.currentDistance = tfLuna.getDistance();
     state.currentStrength = tfLuna.getStrength();
 
-    // Range detection — dynamic range from UI config, never hardcoded
-    state.objectDetected = tfLuna.inRange(config.rangeMin, config.rangeMax);
+    // Pure mode (default, filterEnabled=false): any valid return counts —
+    // full sensor power, no distance restriction, maximum realtime
+    // responsiveness. Filtered mode (Advance > Range Filter ON): same
+    // band-pass [rangeMin, rangeMax] logic as before this switch existed,
+    // completely unchanged.
+    state.objectDetected = config.filterEnabled
+        ? tfLuna.inRange(config.rangeMin, config.rangeMax)
+        : tfLuna.hasObject();
 }
 
 // ============ TRIGGER LOGIC (entry edge + in-zone movement, cooldown-paced) ============
@@ -200,9 +208,18 @@ void AutoShoot::triggerBurst(uint8_t count) {
 // ============ UI INTERACTION ============
 void AutoShoot::handleEncoderRotate(int delta) {
     if (editMode.state == EditMode::SELECTING) {
-        // Navigate between items (0-5: 0-3=settings, 4=START, 5=STOP)
+        if (editMode.screen == EditMode::ADVANCE) {
+            // ADVANCE: 0=Filter ON/OFF, 1=Range Min, 2=Range Max
+            int newIndex = editMode.advanceIndex + (delta > 0 ? 1 : -1);
+            if (newIndex >= 0 && newIndex <= 2) {
+                editMode.advanceIndex = newIndex;
+            }
+            return;
+        }
+
+        // MAIN: 0=Burst, 1=Cooldown, 2=Advance, 3=START, 4=STOP
         int newIndex = editMode.selectedIndex + (delta > 0 ? 1 : -1);
-        if (newIndex >= 0 && newIndex <= 5) {
+        if (newIndex >= 0 && newIndex <= 4) {
             editMode.selectedIndex = newIndex;
         }
     }
@@ -211,18 +228,28 @@ void AutoShoot::handleEncoderRotate(int delta) {
         if (delta > 0) delta = 1;
         else if (delta < 0) delta = -1;
 
-        switch (editMode.selectedIndex) {
-            case 0:  // Range Min
+        if (editMode.screen == EditMode::ADVANCE) {
+            // Only Range Min (1) / Range Max (2) are ever edited here —
+            // identical logic to the original Range Min/Max editing
+            // (validateConfig() below still clamps/auto-swaps exactly as
+            // before), just relocated from the main screen into this
+            // submenu.
+            if (editMode.advanceIndex == 1) {          // Range Min
                 config.rangeMin += (delta * 0.1f);
-                break;
-            case 1:  // Range Max
+            } else if (editMode.advanceIndex == 2) {    // Range Max
                 config.rangeMax += (delta * 0.1f);
-                break;
-            case 2:  // Burst Shots
+            }
+            validateConfig();
+            return;
+        }
+
+        switch (editMode.selectedIndex) {
+            case 0:  // Burst Shots
                 config.burstShots += delta;
                 break;
-            case 3:  // Cooldown
-                config.cooldownMs += (delta * 50);
+            case 1:  // Cooldown — 10ms step (was 50ms) for finer control
+                     // now that the default is 0
+                config.cooldownMs += (delta * 10);
                 break;
         }
 
@@ -232,28 +259,60 @@ void AutoShoot::handleEncoderRotate(int delta) {
 
 void AutoShoot::handleButtonPress() {
     if (editMode.state == EditMode::SELECTING) {
-        if (editMode.selectedIndex == 4) {
+        if (editMode.screen == EditMode::ADVANCE) {
+            if (editMode.advanceIndex == 0) {
+                // Range Filter ON/OFF — instant toggle, no EDITING needed
+                config.filterEnabled = !config.filterEnabled;
+                saveConfig();
+            } else {
+                // Range Min (1) / Range Max (2) — enter EDITING
+                editMode.state = EditMode::EDITING;
+                editMode.enterTime = millis();
+            }
+            return;
+        }
+
+        // MAIN
+        if (editMode.selectedIndex == 2) {
+            // Open the Advance (Range Filter) submenu
+            editMode.screen = EditMode::ADVANCE;
+            editMode.advanceIndex = 0;
+        } else if (editMode.selectedIndex == 3) {
             start();
-        } else if (editMode.selectedIndex == 5) {
+        } else if (editMode.selectedIndex == 4) {
             stop();
         } else {
-            // Enter edit mode for selected settings item
+            // 0=Burst, 1=Cooldown -> enter edit mode
             editMode.state = EditMode::EDITING;
             editMode.enterTime = millis();
         }
     }
     else if (editMode.state == EditMode::EDITING) {
-        // Save and exit edit mode
+        // Save and exit edit mode (MAIN's Burst/Cooldown and ADVANCE's
+        // Range Min/Max both funnel through here identically)
         saveConfig();
         editMode.state = EditMode::SELECTING;
     }
 }
 
 void AutoShoot::handleButtonLongPress() {
-    // Long press: exit back to menu
+    // Inside the Advance submenu: long press = back to MAIN screen only,
+    // same convention as TriggerMode's Bluetooth sub-screen. Do NOT stop a
+    // run in progress just for navigating back.
+    if (editMode.screen == EditMode::ADVANCE) {
+        closeAdvanceScreen();
+        return;
+    }
+
+    // MAIN screen: long press = exit back to the launcher menu
     editMode.state = EditMode::IDLE;
     editMode.selectedIndex = 0;
     state.isRunning = false;
+}
+
+void AutoShoot::closeAdvanceScreen() {
+    editMode.screen = EditMode::MAIN;
+    editMode.selectedIndex = 2;   // back on the "Advance" row
 }
 
 // ============ CONTROL ============
@@ -277,21 +336,33 @@ void AutoShoot::stop() {
 
 // ============ GETTERS ============
 const char* AutoShoot::getSelectedItemName() {
+    if (editMode.screen == EditMode::ADVANCE) {
+        switch (editMode.advanceIndex) {
+            case 0: return "Range Filter";
+            case 1: return "Range Min";
+            case 2: return "Range Max";
+            default: return "Unknown";
+        }
+    }
     switch (editMode.selectedIndex) {
-        case 0: return "Range Min";
-        case 1: return "Range Max";
-        case 2: return "Burst Shots";
-        case 3: return "Cooldown";
+        case 0: return "Burst Shots";
+        case 1: return "Cooldown";
+        case 2: return "Advance";
         default: return "Unknown";
     }
 }
 
 float AutoShoot::getSelectedValue() {
+    if (editMode.screen == EditMode::ADVANCE) {
+        switch (editMode.advanceIndex) {
+            case 1: return config.rangeMin;
+            case 2: return config.rangeMax;
+            default: return 0.0f;
+        }
+    }
     switch (editMode.selectedIndex) {
-        case 0: return config.rangeMin;
-        case 1: return config.rangeMax;
-        case 2: return (float)config.burstShots;
-        case 3: return (float)config.cooldownMs;
+        case 0: return (float)config.burstShots;
+        case 1: return (float)config.cooldownMs;
         default: return 0.0f;
     }
 }

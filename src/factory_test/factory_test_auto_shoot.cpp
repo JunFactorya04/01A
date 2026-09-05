@@ -96,7 +96,14 @@ void FactoryTest::handleAutoShootButtonShortPress() {
 }
 
 void FactoryTest::handleAutoShootButtonLongPress() {
+    // In the Advance (Range Filter) submenu: long press = back to the MAIN
+    // screen, not exit — same convention as Trigger Mode's Bluetooth screen.
+    bool wasInAdvance = autoShoot.inAdvanceScreen();
     autoShoot.handleButtonLongPress();
+    if (wasInAdvance) {
+        _tone(1000, 100);
+        return;
+    }
     _mode_exit_requested = true;
     _tone(1500, 150);
 }
