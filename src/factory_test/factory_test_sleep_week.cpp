@@ -187,8 +187,13 @@ void FactoryTest::_sleep_week_loop() {
     if (autoShoot.state.isRunning) autoShoot.update();
     timelapse.update();
     
-    // 3. Handle input
-    handleSleepWeekInput();
+    // 3. Handle input — display power save (dim/screen-off after
+    //    inactivity) runs here too now. Unrelated to the scheduler's own
+    //    device sleep above (backlight only). Skip real input handling the
+    //    one cycle a wake-tap fires.
+    if (!_display_power_save_tick()) {
+        handleSleepWeekInput();
+    }
     
     // 4. Render UI
     renderSleepWeekUI();

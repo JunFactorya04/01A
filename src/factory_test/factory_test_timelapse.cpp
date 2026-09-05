@@ -46,9 +46,13 @@ void FactoryTest::_timelapse_loop() {
 
     // 1. Update Timelapse logic
     timelapse.update();
-    
-    // 2. Handle input
-    handleTimelapseInput();
+
+    // 2. Handle input — power save dim/screen-off after inactivity runs
+    //    here too now (display brightness only, never gates the timer
+    //    above). Skip real input handling the one cycle a wake-tap fires.
+    if (!_display_power_save_tick()) {
+        handleTimelapseInput();
+    }
     
     // 3. Render UI
     renderTimelapseUI();

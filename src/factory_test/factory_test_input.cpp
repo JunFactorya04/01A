@@ -5,6 +5,8 @@
 
 #include "factory_test.h"
 #include "../common/hardware_config.h"
+#include "../display_mode/display_mode.h"
+#include "../sleep_week/sleep_week_ui.h"   // schedulerPopupActive()
 
 int FactoryTest::_read_encoder_delta(int& last_pos, bool playBuzz)
 {
@@ -54,6 +56,34 @@ FactoryTest::ButtonEvent FactoryTest::_read_mode_button_event(unsigned long shor
     }
 
     return ButtonEvent::None;
+}
+
+bool FactoryTest::_display_power_save_tick()
+{
+    // A scheduler countdown popup (SLEEP/WAKE/AUTO START) is meant to alert
+    // a person standing in front of the device -- never let it dim through
+    // that. Also covers the pre-popup autostart-pending window.
+    if (schedulerPopupActive() || _scheduler_autostart_pending)
+    {
+        DisplayPowerSave::keepAwake();
+        _pw_save_enc_last_pos = _enc.getCount();
+        return false;
+    }
+
+    DisplayPowerSave::tick();
+
+    bool encMoved = (_enc.getCount() != _pw_save_enc_last_pos);
+    bool btnDown  = (digitalRead(POWER_BUTTON_PIN) == LOW);
+
+    if ((encMoved || btnDown) && DisplayPowerSave::wake())
+    {
+        // Swallow the waking input this cycle only (main-menu pattern).
+        _pw_save_enc_last_pos = _enc.getCount();
+        return true;
+    }
+
+    _pw_save_enc_last_pos = _enc.getCount();
+    return false;
 }
 
 void FactoryTest::_reset_mode_input_state()

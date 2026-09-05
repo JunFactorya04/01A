@@ -57,7 +57,10 @@ void FactoryTest::_multi_box_test() {
 }
 
 void FactoryTest::_multi_box_loop() {
-    handleMultiBoxInput();
+    // Power save dim/screen-off after inactivity runs here too now.
+    if (!_display_power_save_tick()) {
+        handleMultiBoxInput();
+    }
     renderMultiBoxPlaceholder();
 }
 

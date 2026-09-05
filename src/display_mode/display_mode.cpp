@@ -154,4 +154,13 @@ void exitPowerSave() {
 
 bool isSaving() { return s_dimmed || s_screenOff; }
 
+void keepAwake() {
+    s_lastActivity = millis();
+    if (s_dimmed || s_screenOff) {
+        s_dimmed    = false;
+        s_screenOff = false;
+        displayMode.applyBrightness();
+    }
+}
+
 }   // namespace DisplayPowerSave

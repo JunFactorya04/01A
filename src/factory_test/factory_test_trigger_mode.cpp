@@ -46,8 +46,11 @@ void FactoryTest::_trigger_mode_loop() {
         _reset_mode_input_state();
     }
     
-    // 3. Handle input
-    handleTriggerModeInput();
+    // 3. Handle input — power save dim/screen-off after inactivity runs
+    //    here too now. Skip real input handling the one cycle a wake-tap fires.
+    if (!_display_power_save_tick()) {
+        handleTriggerModeInput();
+    }
     
     // 4. Render UI
     renderTriggerModeUI();

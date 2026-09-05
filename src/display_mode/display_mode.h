@@ -46,9 +46,14 @@ extern DisplayMode displayMode;
 // ============ POWER SAVE ENGINE (main menu only) ============
 // 2 stages: after dimmerSec -> dim to 5%, +5s more -> screen off (brightness only).
 namespace DisplayPowerSave {
-    void tick();          // call every frame at main menu
+    void tick();          // call every frame (main menu AND feature modes)
     bool wake();          // any input: restore brightness, reset timer.
                           // returns true if it actually woke (caller must swallow the key)
     void exitPowerSave(); // force full-awake state (call before entering any app)
     bool isSaving();      // dimmed or screen off
+    // Force full brightness and reset the idle timer WITHOUT requiring a
+    // key press — call every frame a countdown popup (scheduler SLEEP/WAKE,
+    // AUTO START) is on screen, so power save can't dim through something
+    // meant to alert a person standing in front of the device.
+    void keepAwake();
 }

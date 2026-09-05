@@ -58,9 +58,17 @@ class LauncherMenu : public SmoothOptions
         if (isOpening())
             return;
 
-        // ── Power save (main menu only) ──
-        DisplayPowerSave::tick();
+        // ── Power save ──
+        // Keep the screen fully awake through a scheduler countdown popup
+        // (SLEEP/WAKE) shown here too — it's meant to alert a person, so
+        // don't let it dim through that.
+        if (schedulerPopupActive())
         {
+            DisplayPowerSave::keepAwake();
+        }
+        else
+        {
+            DisplayPowerSave::tick();
             bool encMoved = (_ft->_enc.getPosition() != _last_enc_postion);
             bool btnDown  = !_ft->_btn_pwr.read();
             if ((encMoved || btnDown) && DisplayPowerSave::wake())

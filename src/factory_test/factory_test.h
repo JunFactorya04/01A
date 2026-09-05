@@ -82,6 +82,21 @@ public:
     ButtonEvent _read_mode_button_event(unsigned long shortPressMs = 500, unsigned long longPressMs = 1500);
     void _reset_mode_input_state();
 
+    // Display power save (dim/screen-off after inactivity), extended to run
+    // inside every mode's own loop, not just the main menu. Call once per
+    // loop iteration, right before that mode's own handleXxxInput(); if it
+    // returns true, this cycle's button/encoder movement was just consumed
+    // to wake the screen back up, so skip handleXxxInput() for that one
+    // cycle only (matches the main-menu's own wake-swallow behavior in
+    // view.cpp) -- everything else in the loop (sensor polling, timers,
+    // rendering) keeps running unconditionally regardless of the return
+    // value. Purely a display-brightness concern; never gates any mode's
+    // actual functional logic. Automatically holds the screen at full
+    // brightness (via DisplayPowerSave::keepAwake()) while a scheduler
+    // countdown popup is on screen, since that's meant to alert a person.
+    bool _display_power_save_tick();
+    int _pw_save_enc_last_pos = 0;
+
     /* Encoder */
     // RotaryEncoder _enc = RotaryEncoder(40, 41, RotaryEncoder::LatchMode::TWO03);
     ESP32Encoder _enc;

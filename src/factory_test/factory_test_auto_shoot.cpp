@@ -50,9 +50,16 @@ void FactoryTest::_auto_shoot_loop() {
     //    keeps I2C at 100Hz exactly as before; trigger fires on the freshest
     //    frame instead of waiting behind a 20-30ms render.
     autoShoot.update();
-    
-    // 2. Handle input every cycle — encoder/button extra snappy
-    handleAutoShootInput();
+
+    // 2. Handle input every cycle — encoder/button extra snappy. Power save
+    //    dim/screen-off after inactivity now runs here too (not just the
+    //    main menu) — display brightness only, never gates sensor polling
+    //    or triggering above. If this cycle's input was just consumed to
+    //    wake the screen, skip real input handling so the waking tap can't
+    //    also act as a command (e.g. accidentally toggling STOP).
+    if (!_display_power_save_tick()) {
+        handleAutoShootInput();
+    }
     
     // 3. Render UI throttled to ~30fps so the slow canvas push no longer
     //    sits between sensor polls (render never blocks detection)

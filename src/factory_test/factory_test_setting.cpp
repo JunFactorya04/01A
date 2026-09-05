@@ -64,7 +64,11 @@ void FactoryTest::_setting_test() {
 
 // ============ SETTING LOOP ============
 void FactoryTest::_setting_loop() {
-    handleSettingInput();
+    // Power save dim/screen-off after inactivity runs here too now. Skip
+    // real input handling the one cycle a wake-tap fires.
+    if (!_display_power_save_tick()) {
+        handleSettingInput();
+    }
     renderSettingUI();
 }
 
