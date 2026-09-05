@@ -190,6 +190,29 @@ function is always effectively "exit Setting" since
 behavior, not something introduced by this change) — matching `DisplayMode`'s original
 "save on exit" rule from when it was its own standalone mode.
 
+### Display power save runs in every mode, via one shared helper
+
+`DisplayPowerSave` (in `display_mode.cpp`) used to only tick inside `view.cpp`'s launcher —
+entering any mode called `exitPowerSave()` and nothing re-armed the dim/screen-off timer, so the
+screen stayed at full brightness indefinitely while idle inside any mode. It's now wired into
+every mode's loop (Auto Shoot, Timelapse, Trigger Mode, Sleep & Week, Setting, Multi Box) through
+one shared method, `FactoryTest::_display_power_save_tick()` (`factory_test_input.cpp`) — call it
+once per loop iteration right before that mode's own `handleXxxInput()`; a `true` return means
+this cycle's button/encoder movement was just consumed to wake the screen back up, so skip the
+real `handleXxxInput()` call for that one cycle (mirrors the swallow-on-wake pattern already used
+in the launcher, so a "waking tap" can't also fire a real command like toggling STOP). This is
+purely `_disp->setBrightness()` on the backlight — it never gates or delays a mode's actual
+functional logic (TF-Luna polling, timers, trigger GPIO), which keeps running every cycle
+regardless. `DisplayPowerSave::keepAwake()` forces full brightness and resets the idle timer
+without a keypress; both the shared helper and the launcher's own tick call it whenever
+`schedulerPopupActive()` (or `_scheduler_autostart_pending`) is true, since a SLEEP/WAKE/AUTO
+START countdown exists specifically to alert a person and must never dim out from under them.
+
+OTA Update is deliberately **not** wired into this — its screen is one large state-machine
+`switch` (WiFi scan, password entry, flashing) rather than the simple loop+`handleInput` shape
+every other mode has, and its flow is normally actively supervised, so it needs its own
+integration pass rather than reusing this helper blindly.
+
 ### UI convention ("GEOPIX UI STANDARD")
 
 All mode UIs share one visual language, documented at the top of
