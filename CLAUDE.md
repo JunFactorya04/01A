@@ -129,6 +129,42 @@ speed-scaled encoder steps, a TEST button, or similar UX tweaks without hardware
 this exact class of change has already had to be reverted once after appearing to destabilize the
 sensor.
 
+### Timelapse: video calculator (default) vs. the Advance direct-entry screen
+
+Same MAIN/ADVANCE split as Auto Shoot and Trigger Mode, built around the observation that most
+timelapse shooting is done to make a video, so the primary screen speaks in those terms rather
+than raw interval math.
+
+`intervalMs`/`totalShots` in `TimelapseConfig` remain the **only persisted, actually-used**
+shooting parameters. **MAIN** shows Shoot Duration, Video Length, and Video FPS (24/25/30) as
+editable fields, but these are *derived views* over interval/totalShots, not separate storage —
+editing one solves back into `intervalMs`/`totalShots`. The rule that keeps this well-defined
+regardless of which field you approach it from: **whichever field you're turning right now is
+held fixed at its current value; the other two are recomputed from it** (see
+`Timelapse::handleEncoderRotate()`'s MAIN-screen switch for the three cases). `solveIntervalMs()`
+does the `durationSec * 1000 / shots` math in `long long` and clamps before narrowing to `int` —
+a real overflow was caught here in review (durationSec can reach ~36,000,000 at maxed-out
+Interval/Total Shots; ESP32's `long` is 32-bit and `*1000` of that overflows it before
+`validateConfig()` would otherwise have clamped the result).
+
+**ADVANCE** holds direct Interval/Total Shots entry (unchanged logic, just relocated) plus **Bulb
+Mode** — milky way / astro long exposures. When `bulbEnabled`, each shot **holds** G1/G2 for
+`bulbExposureSec` (1-900s) instead of the usual ~6ms pulse. This is a **non-blocking state
+machine** (`state.isExposing`, checked every `update()` tick), deliberately not a blocking
+`delay()` — a 10-30s+ blocking hold would freeze input handling and rendering for the whole
+exposure, unlike the existing brief non-bulb pulse. `validateConfig()` raises Interval's floor to
+the exposure length whenever Bulb is on, so a new exposure can never be asked to start before the
+previous one would finish. `stop()`/`pause()` force-release a mid-exposure hold
+(`forceReleaseBulbIfExposing()`) so the camera's shutter is never left open indefinitely just
+because the sequence was interrupted. The BLE camera-remote channel has no held/bulb command
+(`CameraDriver` only exposes one-shot `trigger()`) — for BLE-only setups the bulb path fires a
+normal single shot after the hold completes rather than actually holding that camera's shutter;
+real bulb timing only works through the physical G1/G2 cable.
+
+The status box's realtime countdown ("next Ns" / "Bulb Ns") + fill progress bar finally puts the
+`getTimeUntilNextShot()` getter to use — it existed in the original code but was never rendered
+anywhere before this.
+
 ### Power-on sequence is brownout-sensitive
 
 `FactoryTest::_power_on()` (`src/factory_test/components/ft_key_test.cpp`) latches
