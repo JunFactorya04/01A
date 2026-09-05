@@ -164,16 +164,31 @@ The old standalone DISPLAY mode's launcher slot is now called MULTI BOX
 ("Coming soon", exits on any press) awaiting design instructions — don't assume it's dead code to
 clean up.
 
-The actual `DisplayMode` class, `DisplayModeConfig`, `DisplayPowerSave` engine, and
-`display_mode_ui.cpp`'s `renderDisplayUI()` are **completely unchanged** and still do everything
-they always did (boot-time apply in `view.cpp`, power-save ticking at the main menu). Only the
-*entry point* moved: brightness / power save / theme / rotation are now edited from **SETTING**
-mode's "Display" row (`SettingEditMode::Screen::DISPLAY_SETTINGS` — named to avoid colliding with
-Arduino.h's `#define DISPLAY 0x1`, which silently breaks enum parsing if reused). `Setting`'s
-input handlers forward straight to `displayMode.handleEncoderRotate()`/`handleButtonPress()` when
-that screen is active, and `renderSettingUI()` calls `renderDisplayUI()` as-is — so if you need to
-change brightness/power-save/theme/rotation behavior, edit `display_mode.cpp`/`display_mode_ui.cpp`
-exactly as before; only navigating *to* that screen goes through Setting now.
+The actual `DisplayMode` class, `DisplayModeConfig`, and `DisplayPowerSave` engine are
+**completely unchanged** and still do everything they always did (boot-time apply in `view.cpp`,
+power-save ticking at the main menu) — `display_mode_ui.cpp`'s `renderDisplayUI()` itself is no
+longer called from anywhere, though, since the fields it drew are now rendered as part of
+Setting's own list (see below). Only the *entry point and rendering* moved, not the underlying
+config/apply/persistence logic.
+
+Brightness / Power Save / Theme / Rotation are edited as **flat rows directly in SETTING mode's
+MAIN list** (indices 2-5, between Speaker and Info) — deliberately NOT a "Display >" sub-screen;
+that was tried and reverted per feedback. Setting's MAIN screen is 7 rows total and doesn't fit
+the display at once, so `setting_ui.cpp` windows it to 4 visible rows with scroll indicators,
+reusing the same `firstVisible` windowing pattern the OTA update mode's WiFi/release lists already
+use (`factory_test_ota_update.cpp`) rather than inventing a new one.
+
+Setting owns navigation/selection for these rows itself (`SettingEditMode` has no separate screen
+for them). Only the **per-field value stepping** — brightness ±10, the power-save preset table,
+theme wrap, rotation toggle — is delegated to `DisplayMode`'s existing `handleEncoderRotate()`,
+by temporarily pointing `displayMode.editMode.selectedIndex`/`state` at the right field
+(Setting's index minus 2) right before calling it. This avoids duplicating that stepping logic in
+two places where it could drift out of sync. Persistence (`displayMode.saveConfig()` +
+re-apply) happens once, unconditionally, at the top of `Setting::handleButtonLongPress()` — that
+function is always effectively "exit Setting" since
+`FactoryTest::handleSettingButtonLongPress()` unconditionally exits on any long press (pre-existing
+behavior, not something introduced by this change) — matching `DisplayMode`'s original
+"save on exit" rule from when it was its own standalone mode.
 
 ### UI convention ("GEOPIX UI STANDARD")
 
