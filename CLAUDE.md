@@ -31,6 +31,13 @@ verification is "does it build" (`pio run`) plus manual testing on hardware.
 the higher speed reliably produced `Serial data stream stopped: Possible serial noise or
 corruption` on this hardware setup. Drop to `115200` if uploads still fail.
 
+Git history starts at commit `checkpoint: stable baseline before TF-Luna I2C frame-rate change`
+(tag `stable-before-fps-change`) — there is no earlier history. Before a change with real
+hardware-regression risk (sensor timing/registers, power-on sequencing, anything hard to verify
+without flashing a real board), commit or tag the current known-good state first so it's a clean
+`git reset --hard <tag>` away if the change destabilizes something on hardware — this project has
+already needed that once.
+
 ## Architecture
 
 ### Central hub + blocking per-mode loops
@@ -74,27 +81,53 @@ camera-firing code path must acquire it around the digitalWrite HIGH/LOW pair.
 ### TF-Luna driver (`src/auto_shoot/tf_luna.h/.cpp`)
 
 I2C on `Wire1` (SDA=13, SCL=15) — deliberately a separate bus from the RTC, which uses `Wire`
-(bus 0). Polling is paced to the sensor's 100Hz frame rate (10ms) with backoff while failing, and
-has self-healing (bus reinit + sensor soft-reset) after `TFLUNA_MAX_FAILS` consecutive failures.
-**`sleep()`/`wake()` (register 0x25) exist in the API but must never be called on mode
-entry/exit** — field testing showed writing that register can stall the sensor for many seconds;
-the comment in the source explains this. `warmUp()` (bounded burst of reads to pre-settle the
-sensor) is intentionally **unused/dead code** — `AutoShoot::init()` uses plain `tfLuna.begin()`.
-It was tried both at boot (`FactoryTest::init()`, right after the power latch) and inside
-`AutoShoot::init()`; either placement made the sensor/board noticeably less stable on real
+(bus 0). Polling is paced to the sensor's *confirmed* frame rate (`_samplePeriodMs`, derived in
+`configureFrameRate()`), with backoff while failing, and self-healing (bus reinit + sensor
+soft-reset) after `TFLUNA_MAX_FAILS` consecutive failures. **`sleep()`/`wake()` (register 0x25)
+exist in the API but must never be called on mode entry/exit** — field testing showed writing
+that register can stall the sensor for many seconds; the comment in the source explains this.
+
+`begin()` raises the sample rate above the sensor's 100Hz default via `configureFrameRate()`,
+which writes registers `0x26`/`0x27` (`TFLUNA_TARGET_FPS_HZ`, currently 200) and reads them back
+to confirm before trusting the new pacing — falls back to the safe 10ms/100Hz pacing if the
+write/readback doesn't check out. These addresses were verified against Benewake's official I2C
+register map and the widely-used `budryerson/TFLuna-I2C` library source, and are distinct from
+the `0x25` register that caused the stalls above — do not conflate the two when reasoning about
+risk. `tfLuna.getFrameRateHz()` exposes the confirmed rate (0 = unconfirmed/fallback) and is shown
+live in the Auto Mode header; reading it is a cached-member read, not an I2C access.
+
+`warmUp()` (bounded burst of reads to pre-settle the sensor) is intentionally **unused/dead
+code** — it was tried both at boot (`FactoryTest::init()`, right after the power latch) and
+inside `AutoShoot::init()`; either placement made the sensor/board noticeably less stable on real
 hardware (the boot placement also risked brownout on a weak battery — see below). If revisiting
 sensor warm-up, treat it as a real regression risk, not a free win, and verify on hardware before
 keeping it.
 
-Auto Shoot's trigger logic (`AutoShoot::checkAndTrigger()`) fires on entry into the configured
-range AND continues re-firing (cooldown-paced) while the measured distance keeps changing inside
-the zone — a pure rising-edge design previously meant a long object that never fully left the
-zone would fire exactly once and never again. This is the one deliberate behavior change kept on
-top of the original Auto Shoot logic; everything else in `auto_shoot.cpp`/`auto_shoot_ui.cpp`
-(encoder step size, START/STOP buttons, range edit clamping, etc.) was intentionally reverted to
-its original form after other experimental tweaks proved less stable — treat the current
-`checkAndTrigger()` + `lastTriggerDistance` field as the stable baseline, not as one option among
-several to keep iterating on casually.
+### Auto Shoot: pure mode (default) vs. the Advance range filter
+
+`AutoShoot` has two screens (`EditMode::Screen`, same MAIN/sub-screen split as TriggerMode's
+Bluetooth screen): **MAIN** (Burst, Cooldown, "Advance" row, START, STOP) and **ADVANCE**
+(Range Filter ON/OFF, Range Min, Range Max). `config.filterEnabled` defaults to **false** — in
+`updateSensorData()` this means `state.objectDetected = tfLuna.hasObject()` (any valid return
+counts, full sensor power, no distance restriction — the "pure" mode). Turning the filter ON in
+Advance switches to `tfLuna.inRange(rangeMin, rangeMax)`, the original band-pass logic, completely
+unchanged. A shared `renderZoneBar()` helper (fixed 0..`TFLUNA_MAX_DISTANCE_M` scale, so the
+configured zone shows in its true physical position rather than scaled to Range Max) is drawn on
+both MAIN (always, to give a passive glance at mode/zone) and ADVANCE (for live feedback while
+tuning Min/Max) — highlighted zone segment only appears when the filter is enabled.
+
+`AutoShoot::checkAndTrigger()` fires on entry into detection (rising edge) AND keeps re-firing
+(cooldown-paced, `AUTOSHOOT_RETRIGGER_DELTA_M` = 0.15m) while the measured distance keeps changing
+during a continuous detection — a pure rising-edge design previously meant a long object that
+never fully left detection would fire exactly once and never again. `cooldownMs` defaults to 0
+(was 500) and its encoder step is 10ms (was 50ms) for finer control near that low default.
+
+Everything else about Auto Shoot's editing UX (encoder step size elsewhere, START/STOP as two
+separate buttons rather than a merged toggle, range-edit clamping instead of swapping) was
+intentionally kept at its original, hardware-confirmed-stable form — don't casually re-introduce
+speed-scaled encoder steps, a TEST button, or similar UX tweaks without hardware verification;
+this exact class of change has already had to be reverted once after appearing to destabilize the
+sensor.
 
 ### Power-on sequence is brownout-sensitive
 
