@@ -152,9 +152,16 @@ Mode** — milky way / astro long exposures. When `bulbEnabled`, each shot **hol
 `bulbExposureSec` (1-900s) instead of the usual ~6ms pulse. This is a **non-blocking state
 machine** (`state.isExposing`, checked every `update()` tick), deliberately not a blocking
 `delay()` — a 10-30s+ blocking hold would freeze input handling and rendering for the whole
-exposure, unlike the existing brief non-bulb pulse. `validateConfig()` raises Interval's floor to
-the exposure length whenever Bulb is on, so a new exposure can never be asked to start before the
-previous one would finish. `stop()`/`pause()` force-release a mid-exposure hold
+exposure, unlike the existing brief non-bulb pulse. **Interval means REST time strictly AFTER an
+exposure completes when Bulb is on** — `lastShotTime` is set in `endBulbExposure()` (completion),
+not `startBulbExposure()` (start), so exposure and rest are sequential, never overlapping. An
+earlier version measured Interval from shot-START to shot-START and raised its floor to the
+exposure length, which left **zero** real rest time whenever Interval sat at that floor — the
+camera had no time to write/process a long exposure before the next one fired. Total per-shot
+cycle time (`Interval + Exposure` when Bulb is on) is computed by `perShotMs()`, used by
+`getEstimatedDurationSec()`/`currentDurationSecOrBootstrap()`/`solveIntervalMs()` so the MAIN
+screen's calculator accounts for exposure time rather than understating the real duration.
+`stop()`/`pause()` force-release a mid-exposure hold
 (`forceReleaseBulbIfExposing()`) so the camera's shutter is never left open indefinitely just
 because the sequence was interrupted. The BLE camera-remote channel has no held/bulb command
 (`CameraDriver` only exposes one-shot `trigger()`) — for BLE-only setups the bulb path fires a
