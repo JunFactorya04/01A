@@ -75,19 +75,21 @@ void Timelapse::saveConfig() {
 }
 
 void Timelapse::validateConfig() {
-    // Clamp Bulb Exposure first -- Interval's floor depends on it
+    // Clamp Bulb Exposure
     if (config.bulbExposureSec < 1) config.bulbExposureSec = 1;
     if (config.bulbExposureSec > 900) config.bulbExposureSec = 900;
 
-    // Clamp Interval (100ms floor, 1 hour ceiling) -- when Bulb is enabled
-    // the floor is raised to the exposure length so a new exposure can
-    // never be asked to start before the previous one would have finished.
-    int minIntervalMs = 100;
-    if (config.bulbEnabled) {
-        int bulbMs = config.bulbExposureSec * 1000;
-        if (bulbMs > minIntervalMs) minIntervalMs = bulbMs;
-    }
-    if (config.intervalMs < minIntervalMs) config.intervalMs = minIntervalMs;
+    // Clamp Interval (100ms floor, 1 hour ceiling). When Bulb is on, Interval
+    // is the REST period AFTER each exposure completes (see
+    // startBulbExposure()/endBulbExposure()) -- exposure and rest are
+    // sequential, not overlapping, so Interval never needs to be raised to
+    // match the exposure length here. (An earlier version of this raised
+    // Interval's floor to the exposure length under a "time between shot
+    // STARTS" model -- that left zero real rest time whenever a user's
+    // Interval landed at exactly the exposure length, which is exactly the
+    // case the floor itself encouraged. Real cameras need actual time to
+    // write/process a long exposure before the next one starts.)
+    if (config.intervalMs < 100) config.intervalMs = 100;
     if (config.intervalMs > 3600000) config.intervalMs = 3600000;
 
     // Clamp Total Shots (0 to 10000)
@@ -186,7 +188,13 @@ void Timelapse::startBulbExposure() {
 
     state.isExposing        = true;
     state.exposureStartTime = millis();
-    state.lastShotTime      = state.exposureStartTime;   // interval counts from shot START
+    // NOTE: lastShotTime is deliberately NOT set here. It's set in
+    // endBulbExposure() instead, once the exposure actually finishes, so
+    // Interval measures genuine REST time after the shot completes —
+    // giving the camera real time to write/process a long exposure before
+    // the next one starts — rather than time from this shot's START (which
+    // left zero rest whenever Interval landed at exactly the exposure
+    // length).
 
     // Trigger lock stays HELD for the whole exposure — released in
     // endBulbExposure(). Much longer than the ~6ms non-bulb hold, but
@@ -206,6 +214,10 @@ void Timelapse::endBulbExposure() {
 
     state.isExposing = false;
     state.shotCount++;
+
+    // Rest period (Interval) starts counting NOW, from shot completion —
+    // see the note in startBulbExposure().
+    state.lastShotTime = millis();
 }
 
 // Safety net: force-releases a mid-exposure hold so the camera's shutter
@@ -223,13 +235,23 @@ void Timelapse::forceReleaseBulbIfExposing() {
 }
 
 // ============ VIDEO CALCULATOR HELPERS ============
+// Real wall-clock time one shot cycle takes: the configured Interval, plus
+// the Bulb exposure length when Bulb is on (exposure and rest are
+// sequential -- see startBulbExposure()/endBulbExposure()). Non-bulb shots
+// are a ~6ms pulse, negligible next to Interval, so they're not added here.
+long Timelapse::perShotMs() const {
+    long ms = config.intervalMs;
+    if (config.bulbEnabled) ms += (long)config.bulbExposureSec * 1000L;
+    return ms;
+}
+
 long Timelapse::currentDurationSecOrBootstrap() const {
     long d = getEstimatedDurationSec();
     if (d < 0) {
         // totalShots is 0 (infinite) -- bootstrap a concrete number so the
         // calculator has something finite to start editing from.
         int shots = config.totalShots > 0 ? config.totalShots : 1;
-        d = (long)config.intervalMs * shots / 1000;
+        d = perShotMs() * shots / 1000;
     }
     if (d < 1) d = 1;
     return d;
@@ -241,16 +263,22 @@ float Timelapse::currentVideoLengthSecOrBootstrap() const {
     return v;
 }
 
-// intervalMs = durationSec * 1000 / shots, computed in 64-bit and clamped
-// BEFORE narrowing to int. durationSec can reach ~36,000,000 (10000 shots *
-// 3600s interval) -- *1000 is ~36 billion, which overflows a 32-bit long
-// (ESP32's `long` is 32-bit) well before validateConfig() ever gets a
-// chance to clamp it. Doing the multiply in `long long` and clamping here
-// avoids that overflow producing a garbage (possibly negative) interval.
+// intervalMs = durationSec * 1000 / shots, minus the Bulb exposure length
+// (if Bulb is on) since that time is spent exposing, not resting -- solves
+// for the REST time needed so `shots` full cycles (expose + rest) fit
+// `durationSec`. Computed in 64-bit and clamped BEFORE narrowing to int.
+// durationSec can reach ~36,000,000 (10000 shots * 3600s interval) -- *1000
+// is ~36 billion, which overflows a 32-bit long (ESP32's `long` is 32-bit)
+// well before validateConfig() ever gets a chance to clamp it. If the
+// requested duration is too tight to fit the exposures at all, this floors
+// at 100ms rather than going negative -- the real duration will then end up
+// longer than what was asked for, which is honest, not silently wrong.
 int Timelapse::solveIntervalMs(long durationSec, int shots) const {
     if (shots < 1) shots = 1;
-    long long ms = ((long long)durationSec * 1000LL) / (long long)shots;
-    if (ms < 1) ms = 1;
+    long long perShotMsNeeded = ((long long)durationSec * 1000LL) / (long long)shots;
+    long long bulbMs = config.bulbEnabled ? (long long)config.bulbExposureSec * 1000LL : 0LL;
+    long long ms = perShotMsNeeded - bulbMs;
+    if (ms < 100) ms = 100;
     if (ms > 3600000LL) ms = 3600000LL;
     return (int)ms;
 }
@@ -505,8 +533,8 @@ const char* Timelapse::getControlLabel() const {
 // Total time to finish the whole sequence (seconds). -1 = infinite (totalShots=0).
 long Timelapse::getEstimatedDurationSec() const {
     if (config.totalShots <= 0) return -1;
-    // total = intervals between shots * interval
-    long sec = (long)((long long)config.totalShots * config.intervalMs / 1000);
+    // total = shots * (interval + bulb exposure, if any) -- see perShotMs()
+    long sec = (long)((long long)config.totalShots * perShotMs() / 1000);
     return sec;
 }
 

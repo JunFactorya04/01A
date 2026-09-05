@@ -385,8 +385,12 @@ void renderTimelapseAdvanceScreen() {
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(COLOR_BORDER);
     if (bulbOn) {
-        char buf[40];
-        snprintf(buf, sizeof(buf), "Bulb ON: holds trigger %ds/shot", timelapse.config.bulbExposureSec);
+        // Interval is the REST time AFTER each exposure completes (not
+        // overlapping with it) -- spell that out here since it's easy to
+        // assume Interval still means "time between shot starts".
+        char buf[48];
+        snprintf(buf, sizeof(buf), "%ds expose + %s rest/shot",
+                 timelapse.config.bulbExposureSec, formatInterval(timelapse.config.intervalMs));
         _ft->_canvas->drawString(buf, 12, 113);
     } else {
         _ft->_canvas->drawString("Bulb OFF: quick trigger pulse", 12, 113);

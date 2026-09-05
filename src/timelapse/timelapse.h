@@ -129,7 +129,8 @@ private:
     void forceReleaseBulbIfExposing();   // safety net for stop()/pause()
     long currentDurationSecOrBootstrap() const;   // getEstimatedDurationSec(), but never -1
     float currentVideoLengthSecOrBootstrap() const;
-    int solveIntervalMs(long durationSec, int shots) const;   // overflow-safe durationSec*1000/shots, clamped
+    int solveIntervalMs(long durationSec, int shots) const;   // overflow-safe rest-time solver, clamped
+    long perShotMs() const;   // Interval + Bulb exposure (if enabled) -- real time per shot cycle
 };
 
 // Global instance
