@@ -8,6 +8,9 @@
 #include "../trigger_mode/trigger_mode.h"
 #include <Preferences.h>
 
+// Video playback frame rate presets shown/selected on the MAIN screen.
+static const int VIDEO_FPS_PRESETS[3] = {24, 25, 30};
+
 // Global instance
 Timelapse timelapse;
 
@@ -21,20 +24,21 @@ void Timelapse::init() {
     // Initialize G2 output pin (Port B Yellow, GPIO 2) for camera trigger
     pinMode(TRIGGER_G2_PIN, OUTPUT);
     digitalWrite(TRIGGER_G2_PIN, LOW);
-    
+
     // Also init triggerMode so both G1/G2 GPIO are configured and config loaded
     triggerMode.init();
-    
+
     // Load saved configuration
     loadConfig();
-    
+
     // Validate config
     validateConfig();
-    
+
     // Initialize state — always start idle (never auto-run on entering mode)
     config.enable      = false;
     state.isRunning    = false;
     state.isPaused     = false;
+    state.isExposing   = false;
     state.lastShotTime = millis();
     state.shotCount    = 0;
 }
@@ -43,46 +47,77 @@ void Timelapse::init() {
 void Timelapse::loadConfig() {
     Preferences prefs;
     prefs.begin("timelapse");
-    
-    config.intervalMs = prefs.getInt("interval", 5000);
-    config.totalShots = prefs.getInt("totalShots", 0);
-    config.enable = prefs.getBool("enable", false);
-    
+
+    config.intervalMs      = prefs.getInt("interval", 5000);
+    config.totalShots      = prefs.getInt("totalShots", 0);
+    config.enable          = prefs.getBool("enable", false);
+    config.bulbEnabled     = prefs.getBool("bulbEn", false);
+    config.bulbExposureSec = prefs.getInt("bulbSec", 15);
+    config.videoFpsIndex   = (uint8_t)prefs.getInt("vidFps", 2);
+
     prefs.end();
-    
+
     validateConfig();
 }
 
 void Timelapse::saveConfig() {
     Preferences prefs;
     prefs.begin("timelapse");
-    
+
     prefs.putInt("interval", config.intervalMs);
     prefs.putInt("totalShots", config.totalShots);
     prefs.putBool("enable", config.enable);
-    
+    prefs.putBool("bulbEn", config.bulbEnabled);
+    prefs.putInt("bulbSec", config.bulbExposureSec);
+    prefs.putInt("vidFps", config.videoFpsIndex);
+
     prefs.end();
 }
 
 void Timelapse::validateConfig() {
-    // Clamp Interval (100ms to 1 hour)
-    if (config.intervalMs < 100) config.intervalMs = 100;
+    // Clamp Bulb Exposure first -- Interval's floor depends on it
+    if (config.bulbExposureSec < 1) config.bulbExposureSec = 1;
+    if (config.bulbExposureSec > 900) config.bulbExposureSec = 900;
+
+    // Clamp Interval (100ms floor, 1 hour ceiling) -- when Bulb is enabled
+    // the floor is raised to the exposure length so a new exposure can
+    // never be asked to start before the previous one would have finished.
+    int minIntervalMs = 100;
+    if (config.bulbEnabled) {
+        int bulbMs = config.bulbExposureSec * 1000;
+        if (bulbMs > minIntervalMs) minIntervalMs = bulbMs;
+    }
+    if (config.intervalMs < minIntervalMs) config.intervalMs = minIntervalMs;
     if (config.intervalMs > 3600000) config.intervalMs = 3600000;
-    
+
     // Clamp Total Shots (0 to 10000)
     if (config.totalShots < 0) config.totalShots = 0;
     if (config.totalShots > 10000) config.totalShots = 10000;
+
+    // Clamp Video FPS index
+    if (config.videoFpsIndex > 2) config.videoFpsIndex = 2;
 }
 
 // ============ MAIN UPDATE ============
 void Timelapse::update() {
     if (!state.isRunning) return;
-    
+
+    // Mid-bulb-exposure: only check for completion. Nothing else about the
+    // sequence (new-shot decision, shot count) advances until the hold
+    // ends -- this is what makes it non-blocking instead of a delay().
+    if (state.isExposing) {
+        unsigned long heldMs = millis() - state.exposureStartTime;
+        if (heldMs >= (unsigned long)config.bulbExposureSec * 1000UL) {
+            endBulbExposure();
+        }
+        return;
+    }
+
     unsigned long now = millis();
-    
+
     // Interval check
     if (now - state.lastShotTime >= (unsigned long)config.intervalMs) {
-        
+
         // Sequence complete?
         if (config.totalShots != 0 && state.shotCount >= config.totalShots) {
             state.isRunning = false;
@@ -90,16 +125,19 @@ void Timelapse::update() {
             config.enable   = false;
             return;
         }
-        
-        // Trigger camera with lock
-        triggerCamera();
-        
-        state.lastShotTime = now;
-        state.shotCount++;
+
+        if (config.bulbEnabled) {
+            startBulbExposure();   // non-blocking hold; finishes in a later update()
+        } else {
+            // Trigger camera with lock (unchanged quick-pulse path)
+            triggerCamera();
+            state.lastShotTime = now;
+            state.shotCount++;
+        }
     }
 }
 
-// ============ CAMERA TRIGGER ============
+// ============ CAMERA TRIGGER (non-bulb quick pulse) ============
 void Timelapse::triggerCamera() {
     // Acquire global trigger lock to prevent conflict with Auto Shoot
     if (!acquireTriggerLock()) return;
@@ -123,22 +161,272 @@ void Timelapse::triggerCamera() {
     triggerMode.fireBluetoothIfEnabled();
 }
 
+// ============ BULB EXPOSURE (non-blocking long hold) ============
+// Starts a HELD trigger pulse for config.bulbExposureSec instead of the
+// usual ~6ms tap. The camera must already be set to BULB mode by the
+// photographer; holding G1/G2 closed is what keeps its shutter open.
+// NOTE: the BLE camera-remote channel does NOT support a held/bulb command
+// (CameraDriver only exposes a one-shot trigger()) -- for BLE-only setups
+// fireBluetoothIfEnabled() below just fires a normal single shot after the
+// hold completes, it does not actually hold that camera's shutter open.
+// Real bulb timing only works through the physical G1/G2 cable.
+void Timelapse::startBulbExposure() {
+    if (!acquireTriggerLock()) return;   // retry next tick; nothing advances meanwhile
+
+    bool fireG2 = triggerMode.config.triggerEnabled;
+    bool fireG1 = triggerMode.config.remoteEnabled;
+    if (!fireG2 && !fireG1 && !triggerMode.config.bluetoothEnabled) fireG2 = true;
+
+    state.bulbFiredG2 = fireG2;
+    state.bulbFiredG1 = fireG1;
+
+    if (fireG2) digitalWrite(TRIGGER_G2_PIN, HIGH);
+    if (fireG1) digitalWrite(TRIGGER_G1_PIN, HIGH);
+    if (triggerMode.config.beepEnabled && g_speakerEnabled) tone(BUZZ_PIN, 2500, 60);   // "exposure started" cue
+
+    state.isExposing        = true;
+    state.exposureStartTime = millis();
+    state.lastShotTime      = state.exposureStartTime;   // interval counts from shot START
+
+    // Trigger lock stays HELD for the whole exposure — released in
+    // endBulbExposure(). Much longer than the ~6ms non-bulb hold, but
+    // correct: this firmware only ever runs one mode at a time, so nothing
+    // else can contend for it during a real exposure.
+}
+
+void Timelapse::endBulbExposure() {
+    if (state.bulbFiredG2) digitalWrite(TRIGGER_G2_PIN, LOW);
+    if (state.bulbFiredG1) digitalWrite(TRIGGER_G1_PIN, LOW);
+    if (triggerMode.config.beepEnabled && g_speakerEnabled) tone(BUZZ_PIN, 1500, 60);   // "exposure done" cue
+
+    releaseTriggerLock();
+
+    // 3rd channel: BLE camera remote — see the caveat in startBulbExposure().
+    triggerMode.fireBluetoothIfEnabled();
+
+    state.isExposing = false;
+    state.shotCount++;
+}
+
+// Safety net: force-releases a mid-exposure hold so the camera's shutter
+// is never left open indefinitely just because the user pressed
+// STOP/PAUSE (or exited the mode) while a bulb shot was in progress.
+void Timelapse::forceReleaseBulbIfExposing() {
+    if (!state.isExposing) return;
+
+    if (state.bulbFiredG2) digitalWrite(TRIGGER_G2_PIN, LOW);
+    if (state.bulbFiredG1) digitalWrite(TRIGGER_G1_PIN, LOW);
+    releaseTriggerLock();
+    state.isExposing = false;
+    // Deliberately NOT counted as a completed shot (no shotCount++) and no
+    // BLE fire — it was cut short, not a real capture.
+}
+
+// ============ VIDEO CALCULATOR HELPERS ============
+long Timelapse::currentDurationSecOrBootstrap() const {
+    long d = getEstimatedDurationSec();
+    if (d < 0) {
+        // totalShots is 0 (infinite) -- bootstrap a concrete number so the
+        // calculator has something finite to start editing from.
+        int shots = config.totalShots > 0 ? config.totalShots : 1;
+        d = (long)config.intervalMs * shots / 1000;
+    }
+    if (d < 1) d = 1;
+    return d;
+}
+
+float Timelapse::currentVideoLengthSecOrBootstrap() const {
+    float v = getVideoLengthSec();
+    if (v < 0.0f) v = 0.0f;
+    return v;
+}
+
+// intervalMs = durationSec * 1000 / shots, computed in 64-bit and clamped
+// BEFORE narrowing to int. durationSec can reach ~36,000,000 (10000 shots *
+// 3600s interval) -- *1000 is ~36 billion, which overflows a 32-bit long
+// (ESP32's `long` is 32-bit) well before validateConfig() ever gets a
+// chance to clamp it. Doing the multiply in `long long` and clamping here
+// avoids that overflow producing a garbage (possibly negative) interval.
+int Timelapse::solveIntervalMs(long durationSec, int shots) const {
+    if (shots < 1) shots = 1;
+    long long ms = ((long long)durationSec * 1000LL) / (long long)shots;
+    if (ms < 1) ms = 1;
+    if (ms > 3600000LL) ms = 3600000LL;
+    return (int)ms;
+}
+
+// ============ UI INTERACTION ============
+void Timelapse::handleEncoderRotate(int delta) {
+    if (editMode.state == TimelapseEditMode::SELECTING) {
+        if (editMode.screen == TimelapseEditMode::ADVANCE) {
+            // ADVANCE: 0=Interval 1=Total Shots 2=Bulb Mode 3=Exposure
+            int newIndex = editMode.advanceIndex + (delta > 0 ? 1 : -1);
+            if (newIndex >= 0 && newIndex <= 3) editMode.advanceIndex = newIndex;
+            return;
+        }
+        // MAIN: 0=Shoot Duration 1=Video Length 2=Video FPS 3=Advance 4=Control
+        int newIndex = editMode.selectedIndex + (delta > 0 ? 1 : -1);
+        if (newIndex >= 0 && newIndex <= 4) editMode.selectedIndex = newIndex;
+    }
+    else if (editMode.state == TimelapseEditMode::EDITING) {
+        if (delta > 0) delta = 1;
+        else if (delta < 0) delta = -1;
+
+        if (editMode.screen == TimelapseEditMode::ADVANCE) {
+            // Direct entry -- identical to the original Interval/Total
+            // Shots editing logic, plus the new Bulb Exposure field.
+            switch (editMode.advanceIndex) {
+                case 0:  // Interval
+                    config.intervalMs += (delta * 100);
+                    break;
+                case 1:  // Total Shots
+                    config.totalShots += delta;
+                    break;
+                case 3:  // Bulb Exposure (seconds)
+                    config.bulbExposureSec += delta;
+                    break;
+                // case 2 (Bulb Mode) is an instant toggle on press, not
+                // encoder-adjustable -- see handleButtonPress().
+            }
+            validateConfig();
+            return;
+        }
+
+        // MAIN screen video calculator. Rule: whichever of these three you
+        // are turning right now is the one field held fixed at its CURRENT
+        // value; the other two are recomputed from it. This keeps the
+        // relationship well-defined no matter which field you approach it
+        // from (see the design discussion this was built from).
+        switch (editMode.selectedIndex) {
+            case 0: {   // Shoot Duration -- keep Total Shots fixed, solve Interval
+                int shots = config.totalShots > 0 ? config.totalShots : 1;
+                long durationSec = currentDurationSecOrBootstrap();
+                durationSec += (long)delta * 60;   // 1 minute per click
+                if (durationSec < 1) durationSec = 1;
+
+                config.totalShots = shots;
+                config.intervalMs = solveIntervalMs(durationSec, shots);
+                break;
+            }
+            case 1: {   // Video Length -- keep Shoot Duration fixed, solve
+                        // Total Shots then Interval
+                long durationSec = currentDurationSecOrBootstrap();
+                int fps = getVideoFps();
+
+                float videoLenSec = currentVideoLengthSecOrBootstrap();
+                videoLenSec += (float)delta;   // 1 second per click
+                if (videoLenSec < 1.0f) videoLenSec = 1.0f;
+
+                int newTotalShots = (int)(videoLenSec * fps + 0.5f);
+                if (newTotalShots < 1) newTotalShots = 1;
+                if (newTotalShots > 10000) newTotalShots = 10000;
+
+                config.totalShots = newTotalShots;
+                config.intervalMs = solveIntervalMs(durationSec, newTotalShots);
+                break;
+            }
+            case 2: {   // Video FPS -- keep Video Length fixed, solve
+                        // Total Shots then Interval
+                long durationSec = currentDurationSecOrBootstrap();
+                float videoLenSec = currentVideoLengthSecOrBootstrap();
+
+                int newIdx = (int)config.videoFpsIndex + (delta > 0 ? 1 : -1);
+                if (newIdx < 0) newIdx = 2;
+                if (newIdx > 2) newIdx = 0;
+                config.videoFpsIndex = (uint8_t)newIdx;
+
+                int newFps = VIDEO_FPS_PRESETS[config.videoFpsIndex];
+                int newTotalShots = (int)(videoLenSec * newFps + 0.5f);
+                if (newTotalShots < 1) newTotalShots = 1;
+                if (newTotalShots > 10000) newTotalShots = 10000;
+
+                config.totalShots = newTotalShots;
+                config.intervalMs = solveIntervalMs(durationSec, newTotalShots);
+                break;
+            }
+        }
+
+        validateConfig();
+    }
+}
+
+void Timelapse::handleButtonPress() {
+    if (editMode.state == TimelapseEditMode::SELECTING) {
+        if (editMode.screen == TimelapseEditMode::ADVANCE) {
+            switch (editMode.advanceIndex) {
+                case 0:   // Interval
+                case 1:   // Total Shots
+                case 3:   // Bulb Exposure
+                    editMode.state = TimelapseEditMode::EDITING;
+                    editMode.enterTime = millis();
+                    break;
+                case 2:   // Bulb Mode -- instant toggle
+                    config.bulbEnabled = !config.bulbEnabled;
+                    validateConfig();
+                    saveConfig();
+                    break;
+            }
+            return;
+        }
+
+        // MAIN screen
+        if (editMode.selectedIndex == 3) {
+            // Open Advance submenu
+            editMode.screen = TimelapseEditMode::ADVANCE;
+            editMode.advanceIndex = 0;
+        } else if (editMode.selectedIndex == 4) {
+            // START / PAUSE / RESUME toggle
+            toggleRunPause();
+        } else {
+            // 0=Shoot Duration 1=Video Length 2=Video FPS -> enter EDITING
+            editMode.state = TimelapseEditMode::EDITING;
+            editMode.enterTime = millis();
+        }
+    }
+    else if (editMode.state == TimelapseEditMode::EDITING) {
+        // Save and exit edit mode (Timelapse's own convention: save
+        // immediately per field, unlike some other modes that defer to
+        // mode-exit)
+        saveConfig();
+        editMode.state = TimelapseEditMode::SELECTING;
+    }
+}
+
+void Timelapse::handleButtonLongPress() {
+    if (editMode.screen == TimelapseEditMode::ADVANCE) {
+        // Back to MAIN screen only, same convention as Auto Shoot's
+        // Advance and Trigger Mode's Bluetooth sub-screen.
+        editMode.screen = TimelapseEditMode::MAIN;
+        editMode.selectedIndex = 3;   // back on "Advance" row
+        return;
+    }
+
+    // MAIN screen: long press = stop and exit back to menu
+    stop();
+    saveConfig();
+    editMode.state = TimelapseEditMode::IDLE;
+    editMode.selectedIndex = 0;
+}
+
 // ============ CONTROL ============
 void Timelapse::start() {
     config.enable      = true;
     state.isRunning    = true;
     state.isPaused     = false;
+    state.isExposing   = false;
     state.lastShotTime = millis();
     state.shotCount    = 0;
 }
 
 void Timelapse::stop() {
+    forceReleaseBulbIfExposing();   // never leave the shutter open on stop
     config.enable   = false;
     state.isRunning = false;
     state.isPaused  = false;
 }
 
 void Timelapse::pause() {
+    forceReleaseBulbIfExposing();   // never leave the shutter open on pause
     // Pause but preserve progress (shotCount, so shooting can resume)
     config.enable   = false;
     state.isRunning = false;
@@ -162,80 +450,47 @@ void Timelapse::toggleRunPause() {
     }
 }
 
-// ============ UI INTERACTION ============
-void Timelapse::handleEncoderRotate(int delta) {
-    if (editMode.state == TimelapseEditMode::SELECTING) {
-        // Navigate: 0=Interval, 1=Total, 2=START/PAUSE control
-        int newIndex = editMode.selectedIndex + (delta > 0 ? 1 : -1);
-        if (newIndex >= 0 && newIndex <= 2) {
-            editMode.selectedIndex = newIndex;
-        }
-    }
-    else if (editMode.state == TimelapseEditMode::EDITING) {
-        // Edit selected value - normalize delta
-        if (delta > 0) delta = 1;
-        else if (delta < 0) delta = -1;
-        
-        switch (editMode.selectedIndex) {
-            case 0:  // Interval
-                config.intervalMs += (delta * 100);
-                break;
-            case 1:  // Total Shots
-                config.totalShots += delta;
-                break;
-        }
-        
-        validateConfig();
-    }
-}
-
-void Timelapse::handleButtonPress() {
-    if (editMode.state == TimelapseEditMode::SELECTING) {
-        if (editMode.selectedIndex == 2) {
-            // START / PAUSE / RESUME toggle
-            toggleRunPause();
-        } else {
-            // Enter edit mode for Interval / Total
-            editMode.state = TimelapseEditMode::EDITING;
-            editMode.enterTime = millis();
-        }
-    }
-    else if (editMode.state == TimelapseEditMode::EDITING) {
-        // Save and exit edit mode
-        saveConfig();
-        editMode.state = TimelapseEditMode::SELECTING;
-    }
-}
-
-void Timelapse::handleButtonLongPress() {
-    // Long press: stop and exit back to menu
-    stop();
-    saveConfig();
-    editMode.state = TimelapseEditMode::IDLE;
-    editMode.selectedIndex = 0;
-}
-
 // ============ GETTERS ============
 const char* Timelapse::getSelectedItemName() {
+    if (editMode.screen == TimelapseEditMode::ADVANCE) {
+        switch (editMode.advanceIndex) {
+            case 0: return "Interval";
+            case 1: return "Total Shots";
+            case 2: return "Bulb Mode";
+            case 3: return "Exposure";
+            default: return "Unknown";
+        }
+    }
     switch (editMode.selectedIndex) {
-        case 0: return "Interval";
-        case 1: return "Total Shots";
-        case 2: return "Control";
+        case 0: return "Shoot Duration";
+        case 1: return "Video Length";
+        case 2: return "Video FPS";
+        case 3: return "Advance";
         default: return "Unknown";
     }
 }
 
 int Timelapse::getSelectedValue() {
+    if (editMode.screen == TimelapseEditMode::ADVANCE) {
+        switch (editMode.advanceIndex) {
+            case 0: return config.intervalMs;
+            case 1: return config.totalShots;
+            case 3: return config.bulbExposureSec;
+            default: return 0;
+        }
+    }
     switch (editMode.selectedIndex) {
-        case 0: return config.intervalMs;
-        case 1: return config.totalShots;
+        case 0: return (int)currentDurationSecOrBootstrap();
+        case 1: return (int)currentVideoLengthSecOrBootstrap();
+        case 2: return getVideoFps();
         default: return 0;
     }
 }
 
 const char* Timelapse::getStatusString() {
-    if (state.isRunning) return "RUNNING";
-    if (state.isPaused)  return "PAUSED";
+    if (state.isExposing) return "BULB";
+    if (state.isRunning)  return "RUNNING";
+    if (state.isPaused)   return "PAUSED";
     if (config.totalShots != 0 && state.shotCount >= config.totalShots && state.shotCount > 0)
         return "DONE";
     return "IDLE";
@@ -265,10 +520,30 @@ int Timelapse::getRemainingShots() const {
 }
 
 unsigned long Timelapse::getTimeUntilNextShot() const {
-    if (!config.enable) return 0;
+    if (!config.enable || state.isExposing) return 0;
     unsigned long elapsed = millis() - state.lastShotTime;
-    if (elapsed >= config.intervalMs) return 0;
-    return config.intervalMs - elapsed;
+    if (elapsed >= (unsigned long)config.intervalMs) return 0;
+    return (unsigned long)config.intervalMs - elapsed;
+}
+
+unsigned long Timelapse::getBulbTimeRemaining() const {
+    if (!state.isExposing) return 0;
+    unsigned long elapsed = millis() - state.exposureStartTime;
+    unsigned long totalMs = (unsigned long)config.bulbExposureSec * 1000UL;
+    if (elapsed >= totalMs) return 0;
+    return totalMs - elapsed;
+}
+
+float Timelapse::getVideoLengthSec() const {
+    int fps = getVideoFps();
+    if (config.totalShots <= 0 || fps <= 0) return -1.0f;
+    return (float)config.totalShots / (float)fps;
+}
+
+int Timelapse::getVideoFps() const {
+    uint8_t i = config.videoFpsIndex;
+    if (i > 2) i = 2;
+    return VIDEO_FPS_PRESETS[i];
 }
 
 bool Timelapse::isRunning() const {

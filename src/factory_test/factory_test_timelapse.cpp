@@ -91,7 +91,14 @@ void FactoryTest::handleTimelapseButtonShortPress() {
 }
 
 void FactoryTest::handleTimelapseButtonLongPress() {
+    // In the Advance submenu: long press = back to MAIN, not exit — same
+    // convention as Auto Shoot's Advance and Trigger Mode's Bluetooth screen.
+    bool wasInAdvance = timelapse.inAdvanceScreen();
     timelapse.handleButtonLongPress();
+    if (wasInAdvance) {
+        _tone(1000, 100);
+        return;
+    }
     _mode_exit_requested = true;
     _tone(1500, 150);
 }
