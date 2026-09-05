@@ -88,6 +88,23 @@ void renderAutoShootHeader() {
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(COLOR_TEXT);
     _ft->_canvas->drawString("<", 5, 2);
+
+    // Confirmed TF-Luna sample rate, top-right. tfLuna.getFrameRateHz() is
+    // just a cached value from the one readback done in begin() -- reading
+    // it here for display costs nothing extra on the I2C bus, same as any
+    // other text drawn on this already-throttled (~30fps) screen.
+    // 0 = the write/readback in configureFrameRate() didn't check out, so
+    // the driver quietly fell back to the safe 100Hz pacing.
+    uint16_t fps = tfLuna.getFrameRateHz();
+    char fpsStr[16];
+    if (fps > 0) snprintf(fpsStr, sizeof(fpsStr), "%uHz", (unsigned)fps);
+    else         snprintf(fpsStr, sizeof(fpsStr), "100Hz*");
+
+    _ft->_canvas->setFont(&fonts::efontCN_10);
+    _ft->_canvas->setTextDatum(top_right);
+    _ft->_canvas->setTextColor(fps > 0 ? COLOR_GREEN : COLOR_YELLOW);
+    _ft->_canvas->drawString(fpsStr, 235, 3);
+    _ft->_canvas->setTextDatum(top_left);
 }
 
 // ============ SETTINGS PANEL ============
