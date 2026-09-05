@@ -8,6 +8,7 @@
 #include "../factory_test/factory_test.h"
 #include "../common/ui_theme.h"   // themed palette
 #include "../sleep_week/sleep_week_ui.h"
+#include "../display_mode/display_mode_ui.h"   // DISPLAY sub-screen reuses renderDisplayUI() as-is
 #include <smooth_ui_toolkit.h>
 #include <time.h>
 
@@ -107,6 +108,14 @@ void renderSettingItem(uint8_t index, const char* label, const char* valueStr,
 void renderSettingUI() {
     if (!_ft || !_ft->_canvas) return;
 
+    // DISPLAY screen: fully delegated to DisplayMode's own render, exactly
+    // as it looked/behaved as a standalone mode (including its own canvas
+    // push) — no scheduler popup here either, matching the original.
+    if (setting.editMode.screen == SettingEditMode::DISPLAY_SETTINGS) {
+        renderDisplayUI();
+        return;
+    }
+
     updateSettingBlink();
     _ft->_canvas->setTextWrap(false);
     _ft->_canvas->fillScreen(COLOR_BG);
@@ -169,8 +178,12 @@ void renderSettingMainItems() {
              setting.config.speakerEnabled ? "ON" : "OFF");
     renderSettingItem(1, "Speaker", valBuf, spkColor);
 
+    // ── Display (brightness / power save / theme / rotation submenu) ──
+    snprintf(valBuf, sizeof(valBuf), ">");
+    renderSettingItem(2, "Display", valBuf, COLOR_GREEN);
+
     // ── Info ──
-    renderSettingItem(2, "Info", ">", COLOR_BORDER);
+    renderSettingItem(3, "Info", ">", COLOR_BORDER);
 }
 
 // ============ DATETIME ITEMS PANEL ============

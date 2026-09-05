@@ -162,11 +162,16 @@ public:
     bool _scheduler_autostart_pending = false; // WEEK wake: auto-START after delay
     unsigned long _scheduler_autostart_at = 0; // millis() when auto-START fires
 
-    /* Display Mode (brightness + power save) */
-    void _display_mode_test();
-    void _display_mode_loop();
-    void handleDisplayInput();
-    int _display_enc_last_pos = 0;
+    /* Multi Box — placeholder, awaiting design. Was the old standalone
+     * DISPLAY mode; its settings (brightness/power save/theme/rotation)
+     * moved into SETTING mode's Display sub-screen, which still delegates
+     * to the unchanged DisplayMode class (display_mode.h/.cpp) — that
+     * class itself is untouched and still runs the main-menu power-save
+     * engine, only the top-level launcher slot's purpose changed. */
+    void _multi_box_test();
+    void _multi_box_loop();
+    void handleMultiBoxInput();
+    int _multi_box_enc_last_pos = 0;
 
     /* OTA Update */
     void _ota_update_test();

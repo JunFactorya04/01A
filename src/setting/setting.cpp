@@ -6,6 +6,7 @@
 
 #include "setting.h"
 #include "../common/hardware_config.h"
+#include "../display_mode/display_mode.h"   // DISPLAY sub-screen delegates to this, unchanged
 #include <Preferences.h>
 #include <sys/time.h>
 #include <time.h>
@@ -100,6 +101,14 @@ void Setting::clampDateTime() {
 
 // ============ ENCODER ============
 void Setting::handleEncoderRotate(int delta) {
+    // DISPLAY screen: fully delegated to DisplayMode's own encoder handling
+    // (it tracks its own SELECTING/EDITING sub-state internally, exactly as
+    // it did as a standalone mode).
+    if (editMode.screen == SettingEditMode::DISPLAY_SETTINGS) {
+        displayMode.handleEncoderRotate(delta);
+        return;
+    }
+
     if (delta > 0) delta = 1;
     else if (delta < 0) delta = -1;
 
@@ -109,9 +118,9 @@ void Setting::handleEncoderRotate(int delta) {
             int newIdx = (int)editMode.selectedIndex + delta;
             if (newIdx >= 0 && newIdx <= 4) editMode.selectedIndex = (uint8_t)newIdx;
         } else {
-            // MAIN: 0-2 (Date&Time, Speaker, Info)
+            // MAIN: 0-3 (Date&Time, Speaker, Display, Info)
             int newIdx = (int)editMode.selectedIndex + delta;
-            if (newIdx >= 0 && newIdx <= 2) editMode.selectedIndex = (uint8_t)newIdx;
+            if (newIdx >= 0 && newIdx <= 3) editMode.selectedIndex = (uint8_t)newIdx;
         }
 
     } else if (editMode.state == SettingEditMode::EDITING) {
@@ -162,6 +171,13 @@ void Setting::handleEncoderRotate(int delta) {
 
 // ============ BUTTON ============
 void Setting::handleButtonPress() {
+    // DISPLAY screen: fully delegated to DisplayMode's own button handling
+    // (toggles its own SELECTING<->EDITING, exactly as a standalone mode).
+    if (editMode.screen == SettingEditMode::DISPLAY_SETTINGS) {
+        displayMode.handleButtonPress();
+        return;
+    }
+
     if (editMode.state == SettingEditMode::SELECTING) {
         if (editMode.screen == SettingEditMode::MAIN) {
             // MAIN screen
@@ -175,6 +191,12 @@ void Setting::handleButtonPress() {
                 g_speakerEnabled = config.speakerEnabled;
                 saveConfig();
             } else if (editMode.selectedIndex == 2) {
+                // Display: enter the delegated DISPLAY sub-screen, starting
+                // it fresh in SELECTING (same as DisplayMode's own mode entry).
+                editMode.screen = SettingEditMode::DISPLAY_SETTINGS;
+                displayMode.editMode.state = DisplayEditMode::SELECTING;
+                displayMode.editMode.selectedIndex = 0;
+            } else if (editMode.selectedIndex == 3) {
                 // Info screen
                 editMode.state = SettingEditMode::SHOWING_INFO;
             }
@@ -190,11 +212,26 @@ void Setting::handleButtonPress() {
         // Any press returns to MAIN selecting
         editMode.state = SettingEditMode::SELECTING;
         editMode.screen = SettingEditMode::MAIN;
-        editMode.selectedIndex = 2;  // back on Info row
+        editMode.selectedIndex = 3;  // back on Info row
     }
 }
 
 void Setting::handleButtonLongPress() {
+    if (editMode.screen == SettingEditMode::DISPLAY_SETTINGS) {
+        // Back to Setting's MAIN screen (not exit) — auto-save on the way
+        // out, same as DisplayMode's own standalone-mode exit behavior
+        // ("thoát ra thì tự lưu"). DisplayMode has no long-press of its
+        // own, so this always applies regardless of its internal
+        // SELECTING/EDITING sub-state, matching the original mode exactly.
+        displayMode.saveConfig();
+        displayMode.applyBrightness();
+        displayMode.applyTheme();
+        displayMode.applyRotation();
+        editMode.screen = SettingEditMode::MAIN;
+        editMode.selectedIndex = 2;  // back on Display row
+        return;
+    }
+
     if (editMode.screen == SettingEditMode::DATETIME) {
         // DATETIME screen: long press returns to MAIN
         clampDateTime();

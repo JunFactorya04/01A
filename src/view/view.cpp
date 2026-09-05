@@ -31,7 +31,7 @@ struct AppOptionRenderProps_t
 constexpr int _app_render_props_list_size = 8;
 constexpr AppOptionRenderProps_t _app_render_props_list[] = {
     {0xB8DBD9, 0x385B59, "AUTO SHOOT", image_data_icon_display},
-    {0x87C38F, 0x07430F, "DISPLAY", image_data_icon_brightness},
+    {0x87C38F, 0x07430F, "MULTI BOX", image_data_icon_brightness},
     {0xC9C9EE, 0x49496E, "TIMELAPSE", image_data_icon_rtc},
     {0xF6A4A4, 0x762424, "OTA UPDATE", image_data_icon_wifi},
     {0x6AB8A0, 0x163820, "TRIGGER", image_data_icon_encoder},
@@ -236,7 +236,7 @@ class LauncherMenu : public SmoothOptions
         if (matching_index == 0)
             _ft->_auto_shoot_test();
         else if (matching_index == 1)
-            _ft->_display_mode_test();
+            _ft->_multi_box_test();
         else if (matching_index == 2)
             _ft->_timelapse_test();
         else if (matching_index == 3)
