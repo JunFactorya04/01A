@@ -101,14 +101,6 @@ void Setting::clampDateTime() {
 
 // ============ ENCODER ============
 void Setting::handleEncoderRotate(int delta) {
-    // DISPLAY screen: fully delegated to DisplayMode's own encoder handling
-    // (it tracks its own SELECTING/EDITING sub-state internally, exactly as
-    // it did as a standalone mode).
-    if (editMode.screen == SettingEditMode::DISPLAY_SETTINGS) {
-        displayMode.handleEncoderRotate(delta);
-        return;
-    }
-
     if (delta > 0) delta = 1;
     else if (delta < 0) delta = -1;
 
@@ -118,13 +110,28 @@ void Setting::handleEncoderRotate(int delta) {
             int newIdx = (int)editMode.selectedIndex + delta;
             if (newIdx >= 0 && newIdx <= 4) editMode.selectedIndex = (uint8_t)newIdx;
         } else {
-            // MAIN: 0-3 (Date&Time, Speaker, Display, Info)
+            // MAIN: 0-6 (Date&Time, Speaker, Brightness, Power Save, Theme,
+            // Rotation, Info) — list scrolls in setting_ui.cpp
             int newIdx = (int)editMode.selectedIndex + delta;
-            if (newIdx >= 0 && newIdx <= 3) editMode.selectedIndex = (uint8_t)newIdx;
+            if (newIdx >= 0 && newIdx <= 6) editMode.selectedIndex = (uint8_t)newIdx;
         }
 
     } else if (editMode.state == SettingEditMode::EDITING) {
-        // Only DATETIME screen has EDITING mode
+        if (editMode.screen == SettingEditMode::MAIN &&
+            editMode.selectedIndex >= 2 && editMode.selectedIndex <= 5) {
+            // Brightness/Power Save/Theme/Rotation: reuse DisplayMode's own
+            // per-field stepping (brightness +-10, power-save preset table,
+            // theme wrap, rotation toggle) instead of duplicating it here.
+            // DisplayMode's index is 0-3 (subtract Setting's own +2 offset);
+            // forcing its state to EDITING makes it run that stepping
+            // switch rather than its own (unused, from here) row navigation.
+            displayMode.editMode.selectedIndex = editMode.selectedIndex - 2;
+            displayMode.editMode.state = DisplayEditMode::EDITING;
+            displayMode.handleEncoderRotate(delta);
+            return;
+        }
+
+        // DATETIME screen fields
         switch (editMode.selectedIndex) {
             case 0: {   // Year: 2000-2099, wraps
                 int y = (int)dateTime.year + delta;
@@ -171,13 +178,6 @@ void Setting::handleEncoderRotate(int delta) {
 
 // ============ BUTTON ============
 void Setting::handleButtonPress() {
-    // DISPLAY screen: fully delegated to DisplayMode's own button handling
-    // (toggles its own SELECTING<->EDITING, exactly as a standalone mode).
-    if (editMode.screen == SettingEditMode::DISPLAY_SETTINGS) {
-        displayMode.handleButtonPress();
-        return;
-    }
-
     if (editMode.state == SettingEditMode::SELECTING) {
         if (editMode.screen == SettingEditMode::MAIN) {
             // MAIN screen
@@ -190,13 +190,15 @@ void Setting::handleButtonPress() {
                 config.speakerEnabled = !config.speakerEnabled;
                 g_speakerEnabled = config.speakerEnabled;
                 saveConfig();
-            } else if (editMode.selectedIndex == 2) {
-                // Display: enter the delegated DISPLAY sub-screen, starting
-                // it fresh in SELECTING (same as DisplayMode's own mode entry).
-                editMode.screen = SettingEditMode::DISPLAY_SETTINGS;
-                displayMode.editMode.state = DisplayEditMode::SELECTING;
-                displayMode.editMode.selectedIndex = 0;
-            } else if (editMode.selectedIndex == 3) {
+            } else if (editMode.selectedIndex >= 2 && editMode.selectedIndex <= 5) {
+                // Brightness / Power Save / Theme / Rotation: enter EDITING.
+                // Sync DisplayMode's index so the very first encoder tick
+                // (before any further sync in handleEncoderRotate) already
+                // points at the right field.
+                editMode.state = SettingEditMode::EDITING;
+                displayMode.editMode.selectedIndex = editMode.selectedIndex - 2;
+                displayMode.editMode.state = DisplayEditMode::EDITING;
+            } else if (editMode.selectedIndex == 6) {
                 // Info screen
                 editMode.state = SettingEditMode::SHOWING_INFO;
             }
@@ -205,6 +207,15 @@ void Setting::handleButtonPress() {
             editMode.state = SettingEditMode::EDITING;
         }
     } else if (editMode.state == SettingEditMode::EDITING) {
+        if (editMode.screen == SettingEditMode::MAIN &&
+            editMode.selectedIndex >= 2 && editMode.selectedIndex <= 5) {
+            // Brightness/Power Save/Theme/Rotation: just stop editing this
+            // field (live-apply already happened per tick in DisplayMode's
+            // own handler). Persistence is deferred to mode exit, matching
+            // DisplayMode's original "thoát ra thì tự lưu" rule exactly.
+            editMode.state = SettingEditMode::SELECTING;
+            return;
+        }
         // DATETIME editing: return to SELECTING
         clampDateTime();
         editMode.state = SettingEditMode::SELECTING;
@@ -212,25 +223,20 @@ void Setting::handleButtonPress() {
         // Any press returns to MAIN selecting
         editMode.state = SettingEditMode::SELECTING;
         editMode.screen = SettingEditMode::MAIN;
-        editMode.selectedIndex = 3;  // back on Info row
+        editMode.selectedIndex = 6;  // back on Info row
     }
 }
 
 void Setting::handleButtonLongPress() {
-    if (editMode.screen == SettingEditMode::DISPLAY_SETTINGS) {
-        // Back to Setting's MAIN screen (not exit) — auto-save on the way
-        // out, same as DisplayMode's own standalone-mode exit behavior
-        // ("thoát ra thì tự lưu"). DisplayMode has no long-press of its
-        // own, so this always applies regardless of its internal
-        // SELECTING/EDITING sub-state, matching the original mode exactly.
-        displayMode.saveConfig();
-        displayMode.applyBrightness();
-        displayMode.applyTheme();
-        displayMode.applyRotation();
-        editMode.screen = SettingEditMode::MAIN;
-        editMode.selectedIndex = 2;  // back on Display row
-        return;
-    }
+    // Persist any Brightness/Power Save/Theme/Rotation change regardless of
+    // which screen we're leaving from: FactoryTest::handleSettingButtonLongPress()
+    // always exits Setting mode on any long press (pre-existing behavior,
+    // unchanged here), so this is effectively always "on exit" — the same
+    // "thoát ra thì tự lưu" rule DisplayMode always applied as its own mode.
+    displayMode.saveConfig();
+    displayMode.applyBrightness();
+    displayMode.applyTheme();
+    displayMode.applyRotation();
 
     if (editMode.screen == SettingEditMode::DATETIME) {
         // DATETIME screen: long press returns to MAIN

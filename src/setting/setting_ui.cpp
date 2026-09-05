@@ -8,7 +8,7 @@
 #include "../factory_test/factory_test.h"
 #include "../common/ui_theme.h"   // themed palette
 #include "../sleep_week/sleep_week_ui.h"
-#include "../display_mode/display_mode_ui.h"   // DISPLAY sub-screen reuses renderDisplayUI() as-is
+#include "../display_mode/display_mode.h"   // Brightness/Power Save/Theme/Rotation values + uiThemeName()
 #include <smooth_ui_toolkit.h>
 #include <time.h>
 
@@ -101,20 +101,12 @@ static void renderInfoScreen() {
 void renderSettingHeader();
 void renderSettingMainItems();
 void renderSettingDateTimeItems();
-void renderSettingItem(uint8_t index, const char* label, const char* valueStr,
-                       uint16_t valColor);
+void renderSettingItem(uint8_t index, int visualRow, const char* label,
+                       const char* valueStr, uint16_t valColor);
 
 // ============ MAIN RENDER ============
 void renderSettingUI() {
     if (!_ft || !_ft->_canvas) return;
-
-    // DISPLAY screen: fully delegated to DisplayMode's own render, exactly
-    // as it looked/behaved as a standalone mode (including its own canvas
-    // push) — no scheduler popup here either, matching the original.
-    if (setting.editMode.screen == SettingEditMode::DISPLAY_SETTINGS) {
-        renderDisplayUI();
-        return;
-    }
 
     updateSettingBlink();
     _ft->_canvas->setTextWrap(false);
@@ -161,29 +153,86 @@ void renderSettingHeader() {
     _ft->_canvas->drawString("HOLD=SAVE", 235, 5);
 }
 
-// ============ MAIN ITEMS PANEL ============
+// ============ MAIN ITEMS PANEL (7 rows, scrolling window) ============
+// 7 items don't fit on a 240x135 screen at once, so this windows to 4
+// visible rows at a time and scrolls to keep the selection visible — same
+// "firstVisible" pattern already used by the OTA update WiFi/release lists
+// (factory_test_ota_update.cpp), not a new UI idea.
+#define SETTING_MAIN_ROW_COUNT   7
+#define SETTING_MAIN_VISIBLE_ROWS 4
+
 void renderSettingMainItems() {
     _ft->_canvas->drawRoundRect(8, 22, 224, 88, 5, COLOR_BORDER);
     _ft->_canvas->setFont(&fonts::efontCN_16);
 
+    int sel = setting.editMode.selectedIndex;
+    int firstVisible = 0;
+    if (sel >= SETTING_MAIN_VISIBLE_ROWS) firstVisible = sel - SETTING_MAIN_VISIBLE_ROWS + 1;
+    if (firstVisible > SETTING_MAIN_ROW_COUNT - SETTING_MAIN_VISIBLE_ROWS)
+        firstVisible = SETTING_MAIN_ROW_COUNT - SETTING_MAIN_VISIBLE_ROWS;
+    if (firstVisible < 0) firstVisible = 0;
+
     char valBuf[24];
 
-    // ── Date & Time ──
-    snprintf(valBuf, sizeof(valBuf), ">");
-    renderSettingItem(0, "Date & Time", valBuf, COLOR_GREEN);
+    // ── Date & Time ── (index 0)
+    if (0 >= firstVisible && 0 < firstVisible + SETTING_MAIN_VISIBLE_ROWS) {
+        snprintf(valBuf, sizeof(valBuf), ">");
+        renderSettingItem(0, 0 - firstVisible, "Date & Time", valBuf, COLOR_GREEN);
+    }
 
-    // ── Speaker ──
-    uint16_t spkColor = setting.config.speakerEnabled ? COLOR_GREEN : COLOR_RED;
-    snprintf(valBuf, sizeof(valBuf), "%s",
-             setting.config.speakerEnabled ? "ON" : "OFF");
-    renderSettingItem(1, "Speaker", valBuf, spkColor);
+    // ── Speaker ── (index 1)
+    if (1 >= firstVisible && 1 < firstVisible + SETTING_MAIN_VISIBLE_ROWS) {
+        uint16_t spkColor = setting.config.speakerEnabled ? COLOR_GREEN : COLOR_RED;
+        snprintf(valBuf, sizeof(valBuf), "%s", setting.config.speakerEnabled ? "ON" : "OFF");
+        renderSettingItem(1, 1 - firstVisible, "Speaker", valBuf, spkColor);
+    }
 
-    // ── Display (brightness / power save / theme / rotation submenu) ──
-    snprintf(valBuf, sizeof(valBuf), ">");
-    renderSettingItem(2, "Display", valBuf, COLOR_GREEN);
+    // ── Brightness ── (index 2) — same value/format as the old DISPLAY mode
+    if (2 >= firstVisible && 2 < firstVisible + SETTING_MAIN_VISIBLE_ROWS) {
+        int pct = (displayMode.config.brightness * 100) / 255;
+        snprintf(valBuf, sizeof(valBuf), "%d%%", pct);
+        renderSettingItem(2, 2 - firstVisible, "Brightness", valBuf, COLOR_GREEN);
+    }
 
-    // ── Info ──
-    renderSettingItem(3, "Info", ">", COLOR_BORDER);
+    // ── Power Save ── (index 3)
+    if (3 >= firstVisible && 3 < firstVisible + SETTING_MAIN_VISIBLE_ROWS) {
+        if (displayMode.config.dimmerSec == 0) snprintf(valBuf, sizeof(valBuf), "OFF");
+        else snprintf(valBuf, sizeof(valBuf), "%ds", displayMode.config.dimmerSec);
+        renderSettingItem(3, 3 - firstVisible, "Power Save", valBuf, COLOR_GREEN);
+    }
+
+    // ── Theme ── (index 4)
+    if (4 >= firstVisible && 4 < firstVisible + SETTING_MAIN_VISIBLE_ROWS) {
+        snprintf(valBuf, sizeof(valBuf), "%s", uiThemeName(displayMode.config.themeIndex));
+        renderSettingItem(4, 4 - firstVisible, "Theme", valBuf, COLOR_GREEN);
+    }
+
+    // ── Rotation ── (index 5)
+    if (5 >= firstVisible && 5 < firstVisible + SETTING_MAIN_VISIBLE_ROWS) {
+        snprintf(valBuf, sizeof(valBuf), "%s", displayMode.config.rotation == 3 ? "NORMAL" : "FLIP");
+        renderSettingItem(5, 5 - firstVisible, "Rotation", valBuf, COLOR_GREEN);
+    }
+
+    // ── Info ── (index 6)
+    if (6 >= firstVisible && 6 < firstVisible + SETTING_MAIN_VISIBLE_ROWS) {
+        renderSettingItem(6, 6 - firstVisible, "Info", ">", COLOR_BORDER);
+    }
+
+    // Scroll hints — small arrows at the panel's top/bottom edge when more
+    // rows exist off-screen in that direction.
+    if (firstVisible > 0) {
+        _ft->_canvas->setFont(&fonts::efontCN_10);
+        _ft->_canvas->setTextDatum(top_center);
+        _ft->_canvas->setTextColor(COLOR_BORDER);
+        _ft->_canvas->drawString("^", 220, 23);
+    }
+    if (firstVisible + SETTING_MAIN_VISIBLE_ROWS < SETTING_MAIN_ROW_COUNT) {
+        _ft->_canvas->setFont(&fonts::efontCN_10);
+        _ft->_canvas->setTextDatum(top_center);
+        _ft->_canvas->setTextColor(COLOR_BORDER);
+        _ft->_canvas->drawString("v", 220, 100);
+    }
+    _ft->_canvas->setTextDatum(top_left);
 }
 
 // ============ DATETIME ITEMS PANEL ============
@@ -195,11 +244,11 @@ void renderSettingDateTimeItems() {
 
     // ── Year ──
     snprintf(valBuf, sizeof(valBuf), "%04d", setting.dateTime.year);
-    renderSettingItem(0, "Year", valBuf, COLOR_GREEN);
+    renderSettingItem(0, 0, "Year", valBuf, COLOR_GREEN);
 
     // ── Month ──
     snprintf(valBuf, sizeof(valBuf), "%02d", setting.dateTime.month);
-    renderSettingItem(1, "Month", valBuf, COLOR_GREEN);
+    renderSettingItem(1, 1, "Month", valBuf, COLOR_GREEN);
 
     // ── Day (compute weekday on-the-fly for display) ──
     {
@@ -213,20 +262,24 @@ void renderSettingDateTimeItems() {
                  setting.dateTime.day,
                  ti.tm_wday >= 0 && ti.tm_wday <= 6 ? WDAY_SHORT[ti.tm_wday] : "?");
     }
-    renderSettingItem(2, "Day", valBuf, COLOR_GREEN);
+    renderSettingItem(2, 2, "Day", valBuf, COLOR_GREEN);
 
     // ── Hour ──
     snprintf(valBuf, sizeof(valBuf), "%02d", setting.dateTime.hour);
-    renderSettingItem(3, "Hour", valBuf, COLOR_GREEN);
+    renderSettingItem(3, 3, "Hour", valBuf, COLOR_GREEN);
 
     // ── Minute ──
     snprintf(valBuf, sizeof(valBuf), "%02d", setting.dateTime.minute);
-    renderSettingItem(4, "Minute", valBuf, COLOR_GREEN);
+    renderSettingItem(4, 4, "Minute", valBuf, COLOR_GREEN);
 }
 
-void renderSettingItem(uint8_t index, const char* label, const char* valueStr,
-                       uint16_t valColor) {
-    int y = ITEM_Y_START + (index * ITEM_HEIGHT);
+// `index` drives selection/highlight logic; `visualRow` is the on-screen
+// slot it's drawn in (0-based from the top of the panel) — they differ only
+// on the scrolling MAIN screen, where a row can be selected while sitting
+// in visual slot 0-3 regardless of its absolute index.
+void renderSettingItem(uint8_t index, int visualRow, const char* label,
+                       const char* valueStr, uint16_t valColor) {
+    int y = ITEM_Y_START + (visualRow * ITEM_HEIGHT);
     bool isSel  = (setting.editMode.selectedIndex == index);
     bool isEdit = (setting.editMode.state == SettingEditMode::EDITING && isSel);
 
