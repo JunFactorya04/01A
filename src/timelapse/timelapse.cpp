@@ -166,12 +166,12 @@ void Timelapse::triggerCamera() {
 // ============ BULB EXPOSURE (non-blocking long hold) ============
 // Starts a HELD trigger pulse for config.bulbExposureSec instead of the
 // usual ~6ms tap. The camera must already be set to BULB mode by the
-// photographer; holding G1/G2 closed is what keeps its shutter open.
-// NOTE: the BLE camera-remote channel does NOT support a held/bulb command
-// (CameraDriver only exposes a one-shot trigger()) -- for BLE-only setups
-// fireBluetoothIfEnabled() below just fires a normal single shot after the
-// hold completes, it does not actually hold that camera's shutter open.
-// Real bulb timing only works through the physical G1/G2 cable.
+// photographer; holding G1/G2 closed is what keeps its shutter open. Only
+// G1/G2 fire here -- the BLE channel is intentionally skipped for the
+// whole bulb sequence (see endBulbExposure()) since it can't honor bulb
+// timing and firing it would just add an uncontrolled second shot on top
+// of the held exposure. Real bulb timing only works through the physical
+// G1/G2 cable.
 void Timelapse::startBulbExposure() {
     if (!acquireTriggerLock()) return;   // retry next tick; nothing advances meanwhile
 
@@ -209,8 +209,15 @@ void Timelapse::endBulbExposure() {
 
     releaseTriggerLock();
 
-    // 3rd channel: BLE camera remote — see the caveat in startBulbExposure().
-    triggerMode.fireBluetoothIfEnabled();
+    // Deliberately NOT firing the BLE channel here. BLE has no held/bulb
+    // command (CameraDriver only exposes one-shot trigger()), so it would
+    // only ever be able to send a normal instant "take photo" -- during a
+    // bulb sequence that meant a second, uncontrolled shot landing right
+    // as/after the cable-held exposure ended (effectively firing two
+    // trigger paths "in parallel" on the same camera). Bulb mode is
+    // exclusive to the physical G1/G2 hold; BLE is skipped entirely while
+    // config.bulbEnabled is on rather than fire a shot it can't time
+    // correctly anyway.
 
     state.isExposing = false;
     state.shotCount++;
@@ -337,7 +344,18 @@ void Timelapse::handleEncoderRotate(int delta) {
                 break;
             }
             case 1: {   // Video Length -- keep Shoot Duration fixed, solve
-                        // Total Shots then Interval
+                        // Total Shots then Interval. EXCEPT when starting
+                        // from Total Shots == 0 (infinite): there is no
+                        // real Duration to hold fixed yet, so bootstrapping
+                        // one from a degenerate "1 shot" guess and then
+                        // solving Interval for the (much larger) new shot
+                        // count produced absurdly short intervals (e.g. a
+                        // 5s default Interval treated as "duration for 1
+                        // shot", stretched to fit 30 shots -> ~166ms
+                        // Interval). Keep the existing Interval instead and
+                        // just extend the shot count; Duration then follows
+                        // naturally (Interval x shots).
+                bool bootstrapping = (config.totalShots == 0);
                 long durationSec = currentDurationSecOrBootstrap();
                 int fps = getVideoFps();
 
@@ -350,11 +368,15 @@ void Timelapse::handleEncoderRotate(int delta) {
                 if (newTotalShots > 10000) newTotalShots = 10000;
 
                 config.totalShots = newTotalShots;
-                config.intervalMs = solveIntervalMs(durationSec, newTotalShots);
+                if (!bootstrapping) {
+                    config.intervalMs = solveIntervalMs(durationSec, newTotalShots);
+                }
                 break;
             }
             case 2: {   // Video FPS -- keep Video Length fixed, solve
-                        // Total Shots then Interval
+                        // Total Shots then Interval (same infinite-start
+                        // bootstrap guard as Video Length above)
+                bool bootstrapping = (config.totalShots == 0);
                 long durationSec = currentDurationSecOrBootstrap();
                 float videoLenSec = currentVideoLengthSecOrBootstrap();
 
@@ -369,7 +391,9 @@ void Timelapse::handleEncoderRotate(int delta) {
                 if (newTotalShots > 10000) newTotalShots = 10000;
 
                 config.totalShots = newTotalShots;
-                config.intervalMs = solveIntervalMs(durationSec, newTotalShots);
+                if (!bootstrapping) {
+                    config.intervalMs = solveIntervalMs(durationSec, newTotalShots);
+                }
                 break;
             }
         }
