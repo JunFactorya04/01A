@@ -35,8 +35,17 @@ static const uint8_t SONY_RECORD_DOWN[]  = {0x01, 0x0F};  // movie rec down
 static const uint8_t SONY_RECORD_UP[]    = {0x01, 0x0E};  // movie rec up
 
 // ===== Timing (ms) =====
-// Half-press is still sent (protocol requires it before full-press),
-// but settle time is minimal — user shoots MF/pre-focused, no AF wait.
-#define SONY_FOCUS_SETTLE_MS    20
-#define SONY_SHUTTER_HOLD_MS    100
-#define SONY_RELEASE_GAP_MS     30
+// Half-press is still sent (protocol requires it before full-press) --
+// this is a reverse-engineered community protocol with no official Sony
+// documentation, so that step is NOT skipped even though camera is always
+// used in Manual Focus: the camera's firmware likely mirrors a real
+// 2-stage mechanical button and may simply ignore SHUTTER_DOWN if it never
+// saw FOCUS_DOWN first. What DID get cut is the wait TIME at each stage --
+// confirmed MF-only means these gaps are pure firmware-processing margin,
+// not AF settle time. SONY_SHUTTER_HOLD_MS is the one with the most
+// real risk if cut too far (needs to be long enough for the camera to
+// register a full press-and-release, not just an AF-related wait) --
+// verify on real hardware that shots aren't being dropped after lowering it.
+#define SONY_FOCUS_SETTLE_MS    5
+#define SONY_SHUTTER_HOLD_MS    50
+#define SONY_RELEASE_GAP_MS     10
