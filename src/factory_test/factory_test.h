@@ -177,15 +177,16 @@ public:
     bool _scheduler_autostart_pending = false; // WEEK wake: auto-START after delay
     unsigned long _scheduler_autostart_at = 0; // millis() when auto-START fires
 
-    /* Multi Box — placeholder, awaiting design. Was the old standalone
-     * DISPLAY mode; its settings (brightness/power save/theme/rotation)
-     * moved into SETTING mode's Display sub-screen, which still delegates
-     * to the unchanged DisplayMode class (display_mode.h/.cpp) — that
-     * class itself is untouched and still runs the main-menu power-save
-     * engine, only the top-level launcher slot's purpose changed. */
+    /* Multi Box — wireless multi-node (ESP-NOW) coordination: START DETECT /
+     * FLASH DETECT / CENTER roles for a synchronized bulb-exposure shooting
+     * flow. Was the old standalone DISPLAY mode's launcher slot; that
+     * mode's settings (brightness/power save/theme/rotation) live in
+     * SETTING's Display rows now (see setting.cpp), unrelated to this. */
     void _multi_box_test();
     void _multi_box_loop();
     void handleMultiBoxInput();
+    void handleMultiBoxButtonShortPress();
+    void handleMultiBoxButtonLongPress();
     int _multi_box_enc_last_pos = 0;
 
     /* OTA Update */
