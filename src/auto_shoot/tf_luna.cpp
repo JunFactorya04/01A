@@ -11,6 +11,65 @@
 // Global instance
 TFLuna tfLuna;
 
+// ============ I2C BUS RECOVERY ============
+// If TF-Luna was mid-transmission when the ESP32 last reset/lost power, it
+// can be left holding SDA low waiting for clock pulses that will never
+// come from a freshly-booted master expecting a clean, idle bus. NO I2C
+// transaction (read OR write) can succeed while this holds -- this is why
+// self-healing via begin()+softResetSensor() alone could never actually
+// recover a truly stuck bus (softResetSensor() is itself an I2C write, so
+// it fails identically). Whether this happens on a given boot depends on
+// the exact timing of the previous power-down relative to the sensor's
+// I2C cycle, which is why the symptom was inconsistent run to run.
+//
+// Standard, well-documented fix (see e.g. ESPHome's own I2C bus recovery,
+// and the NXP I2C-bus specification's bus-clear procedure): before ever
+// handing the pins to the Wire peripheral, manually toggle SCL as a GPIO
+// up to ~20 times to walk a stuck slave through finishing its pending
+// bit(s), then issue a manual STOP condition. Runs in well under a
+// millisecond when the bus is already idle (the check exits immediately);
+// only takes longer in the rare case recovery is actually needed. If SCL
+// itself were ever found stuck (not just SDA), no software fix is
+// possible -- that's a hardware/firmware fault on the other side needing
+// an actual power cycle; this routine does not attempt to handle that
+// case specially, it just falls through to a normal (still-failing)
+// Wire1.begin() same as before this existed.
+static void recoverStuckI2CBus() {
+    pinMode(TFLUNA_SCL_PIN, INPUT_PULLUP);
+    pinMode(TFLUNA_SDA_PIN, INPUT_PULLUP);
+    delayMicroseconds(10);   // let the pull-ups settle before sampling
+
+    if (digitalRead(TFLUNA_SDA_PIN) == HIGH) {
+        return;   // bus already idle -- nothing to recover
+    }
+
+    // SDA held low: clock SCL manually (drive low / release to the pull-up
+    // high, open-drain style) so a stuck slave gets a chance to finish
+    // clocking out its pending bit and release SDA.
+    pinMode(TFLUNA_SCL_PIN, OUTPUT);
+    for (int i = 0; i < 20 && digitalRead(TFLUNA_SDA_PIN) == LOW; i++) {
+        digitalWrite(TFLUNA_SCL_PIN, LOW);
+        delayMicroseconds(5);
+        digitalWrite(TFLUNA_SCL_PIN, HIGH);
+        delayMicroseconds(5);
+    }
+
+    // Manual STOP condition (SDA transitions LOW -> HIGH while SCL is
+    // HIGH) so the bus is left in a clean, idle state for Wire1.begin().
+    pinMode(TFLUNA_SDA_PIN, OUTPUT);
+    digitalWrite(TFLUNA_SDA_PIN, LOW);
+    delayMicroseconds(5);
+    digitalWrite(TFLUNA_SCL_PIN, HIGH);
+    delayMicroseconds(5);
+    digitalWrite(TFLUNA_SDA_PIN, HIGH);
+    delayMicroseconds(5);
+
+    // Release both pins back to plain input; Wire1.begin() reconfigures
+    // them for I2C right after this returns.
+    pinMode(TFLUNA_SDA_PIN, INPUT);
+    pinMode(TFLUNA_SCL_PIN, INPUT);
+}
+
 // ============ INITIALIZATION ============
 void TFLuna::begin() {
     // Release the driver on re-entry, then plain re-init.
@@ -19,6 +78,10 @@ void TFLuna::begin() {
         Wire1.end();
         delay(2);
     }
+
+    // Clear a possibly stuck bus BEFORE the Wire peripheral takes the pins
+    // -- see recoverStuckI2CBus() above for why this matters.
+    recoverStuckI2CBus();
 
     Wire1.begin(TFLUNA_SDA_PIN, TFLUNA_SCL_PIN);
     Wire1.setTimeOut(20);   // bound any blocking I2C op to 20ms
@@ -30,10 +93,31 @@ void TFLuna::begin() {
     _failCount      = 0;
     _lastUpdateTime = millis();
 
+    // Bounded, paced wait for the sensor to actually be ready to answer.
+    // TF-Luna needs real time after power-up to settle (laser + internal
+    // MCU boot); querying it before that is indistinguishable from a real
+    // failure and was landing as the "sometimes falls back to 100Hz"
+    // symptom below, since configureFrameRate()'s write+readback would
+    // just fail on a sensor that hadn't woken up yet. Paced to the
+    // sensor's own ~10ms native frame rate (NOT a tight busy-loop -- that
+    // pattern, from the old warmUp(), was a real cause of instability
+    // before). Hard-capped at 10 attempts (~100ms typical, worst case
+    // under ~300ms with I2C timeouts) so this can never hang begin()
+    // itself -- if no good read comes back in time, update()'s existing
+    // pacing/backoff/self-heal simply takes over from a cold start,
+    // exactly as it always has.
+    for (int i = 0; i < 10; i++) {
+        uint16_t d, s;
+        if (readRegisters(d, s)) break;
+        delay(10);
+    }
+
     // Raise the poll rate above the sensor's 100Hz default. Read-verified;
     // falls back to the known-good 10ms/100Hz pacing if anything about the
     // write/readback doesn't check out, so a flaky first attempt can't
     // leave the driver polling faster than the sensor actually supports.
+    // Much more likely to succeed now that the wait above has given the
+    // sensor a real chance to be answering before this runs.
     configureFrameRate();
 }
 
