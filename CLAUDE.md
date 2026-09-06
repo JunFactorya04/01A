@@ -319,20 +319,13 @@ This is exposed to the rest of the firmware as `TriggerMode`'s third channel
 (`fireBluetoothIfEnabled()`), fired after the G1/G2 GPIO pulse so BLE latency never affects pulse
 timing.
 
-**Sony's `trigger()`/`focus()` (`sony_ble.cpp`) use write-WITHOUT-response** (`writeValue(...,
-false)`) for all 4 commands in the half-press/full-press/release sequence, and shortened timing
-constants (`sony_protocol.h`: `SONY_FOCUS_SETTLE_MS`=5, `SONY_SHUTTER_HOLD_MS`=50,
-`SONY_RELEASE_GAP_MS`=10) — this camera is confirmed always used in Manual Focus, so these gaps
-were never waiting on real AF, just firmware-processing margin. The half-press step itself is
-**not** removed even though MF means the camera does no actual focusing on it: this is a
-reverse-engineered community protocol with no official Sony documentation, and the camera's
-firmware likely mirrors a real 2-stage mechanical shutter button — it may simply ignore
-`SHUTTER_DOWN` if it never saw `FOCUS_DOWN` first. Both changes need hardware verification:
-write-without-response depends on the camera's BLE characteristic actually accepting that mode
-(if commands start getting silently dropped, revert just that part back to `true`), and
-`SHUTTER_HOLD_MS` is the riskiest of the three timings to have cut this far (too short risks the
-camera not registering a complete press-and-release). Canon/Nikon drivers are untouched — this
-was scoped to Sony only.
+**Do not switch Sony's `writeValue()` calls to write-without-response** (`false`) — tried once
+(all 4 commands in the half-press/full-press/release sequence) to cut BLE ack round-trip latency,
+confirmed on real hardware to make the camera **stop receiving the trigger command entirely**.
+Reverted back to write-with-response (`true`). If revisiting Sony BLE latency, the shortened
+timing constants alone (without touching the write-response mode) were not re-tried in isolation
+after this — that remains an open, untested option; changing the response mode is the one
+confirmed dead end.
 
 ### OTA update
 

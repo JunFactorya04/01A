@@ -188,31 +188,22 @@ bool SonyBLE::ensureConnected() {
 bool SonyBLE::trigger() {
     if (!ensureConnected()) return false;
 
-    // half-press -> full press -> release (freemote sequence). Write
-    // WITHOUT response (last arg false): each writeValue(..., true) used
-    // to block until the camera ACKed the GATT write before the next line
-    // even ran -- on top of the explicit delay()s below, not instead of
-    // them. Firing without waiting for that ack is the same "fire and
-    // forget" philosophy the G1/G2 GPIO pulse already uses. NEEDS
-    // HARDWARE VERIFICATION: if this specific characteristic doesn't
-    // support write-without-response, commands could be silently dropped
-    // -- watch for missed shots and revert this one part (back to `true`)
-    // if so, independent of the timing changes below.
-    s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_DOWN, 2, false);
+    // half-press -> full press -> release (freemote sequence)
+    s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_DOWN, 2, true);
     delay(SONY_FOCUS_SETTLE_MS);
-    s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_DOWN, 2, false);
+    s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_DOWN, 2, true);
     delay(SONY_SHUTTER_HOLD_MS);
-    s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_UP, 2, false);
+    s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_UP, 2, true);
     delay(SONY_RELEASE_GAP_MS);
-    s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_UP, 2, false);
+    s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_UP, 2, true);
     return true;
 }
 
 bool SonyBLE::focus() {
     if (!ensureConnected()) return false;
-    s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_DOWN, 2, false);
+    s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_DOWN, 2, true);
     delay(SONY_FOCUS_SETTLE_MS);
-    s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_UP, 2, false);
+    s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_UP, 2, true);
     return true;
 }
 
