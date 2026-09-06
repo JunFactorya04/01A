@@ -244,12 +244,11 @@ scheduler class itself has no hardware dependency. On a scheduled RTC wake,
 5s "AUTO START" countdown popup (`_scheduler_autostart_pending`) consumed inside that mode's own
 loop; a manual power-on (`_manual_power_on`) always goes to the main menu instead.
 
-### DisplayMode lives on, but its launcher slot is now MULTI BOX (placeholder)
+### DisplayMode lives on; its old launcher slot is now MULTI BOX
 
-The old standalone DISPLAY mode's launcher slot is now called MULTI BOX
-(`src/factory_test/factory_test_multi_box.cpp`) and is an intentionally empty placeholder
-("Coming soon", exits on any press) awaiting design instructions — don't assume it's dead code to
-clean up.
+The old standalone DISPLAY mode's launcher slot is now MULTI BOX — see the dedicated section below
+for what that mode actually does. `DisplayMode`/`DisplayModeConfig`/`DisplayPowerSave` themselves
+have nothing to do with Multi Box; they moved to Setting's flat rows (next paragraph), unrelated.
 
 The actual `DisplayMode` class, `DisplayModeConfig`, and `DisplayPowerSave` engine are
 **completely unchanged** and still do everything they always did (boot-time apply in `view.cpp`,
@@ -371,6 +370,80 @@ substantially more reverse-engineering than furble's own source documents. If a 
 turns out to be running new-enough firmware to require Secure, `pair()` will simply fail to find a
 match (the Basic scan filter checks for the token-bearing manufacturer data and one of two specific
 secondary service UUIDs) — there is no fallback or detection message for that case yet.
+
+### MULTI BOX: ESP-NOW multi-node shooting coordinator
+
+`src/multi_box/` — a wireless multi-node system, separate from the BLE camera remote (different
+radio stack: native ESP-NOW over WiFi, `esp_now.h` bundled with arduino-esp32, no third-party
+library). All boxes run identical firmware; **role** (`MBRole`: NONE/START/FLASH/CENTER) and
+**Node ID** are just config, edited in MULTI BOX's own CONNECTION screen. Four abstractions, per
+`src/multi_box/*.h`: `MultiBoxProtocol` (the wire format — one packed `MBPacket` struct + a
+`MBCommand` enum covering HELLO/HELLO_ACK/READY/START/START_ACK/FLASH_FIRE/END_DETECT/SHOT_DONE/
+DISARM/PING/PONG), `NodeManager` (peer persistence + ESP-NOW peer registration + discovery-scan
+bookkeeping + per-sender sequence/replay validation), `MultiBoxController` (owns `esp_now_init()`
+and the actual recv callback, plus the session state machine), and `FlashTrigger` (pluggable
+one-method interface for a FLASH node's physical output — see below).
+
+**Roles and the shooting flow**: a **START** node runs TF-Luna baseline+threshold detection (like
+Auto Shoot's zone logic, but reimplemented here rather than shared, since Auto Shoot's own state
+must not be touched) and, depending on its own `config.signalMode`, either opens a session
+(`EMIT_START`, watches only while no session is active) or closes one (`EMIT_END`, watches only
+*while* a session is active — the "finish line"). This is how two START nodes (start-line +
+finish-line) stay one role type rather than needing a 4th role — `signalMode` is the actual
+distinguishing config, editable per-node in CONNECTION's Signal row (only shown when role ==
+START). A **FLASH** node runs the same baseline+threshold logic gated on session-active, and on
+crossing calls `flashTrigger.fire()` (currently `StubFlashTrigger` — logs only, no hardware wired)
+plus sends `FLASH_FIRE` to CENTER purely for status/logging; this is deliberately independent of
+the camera's own flash sync, which stays whatever it already does. **CENTER** is the session
+coordinator: on a valid `START` it opens the bulb (mirrors — but is a separate, duplicated
+implementation of — Timelapse's own non-blocking bulb-hold pattern, since Timelapse must not be
+touched; see `MultiBoxController::openBulb()`/`closeBulb()`), keeps it open until *both*
+`config.minBulbSec` has elapsed *and* an `END_DETECT` has arrived (min-bulb-time is a floor, not a
+ceiling), broadcasts `SHOT_DONE`, waits `config.rearmMs`, then broadcasts `READY`. A
+`config.maxBulbSec` safety cap force-closes the bulb regardless of `END_DETECT` if it never
+arrives (lost node/packet) — same "never leave the shutter open on a broken path" principle as
+Timelapse's `forceReleaseBulbIfExposing()`, not something the original request spelled out but
+consistent with how every other exposure-holding path in this codebase already behaves.
+
+**Anti-replay/staleness**: the ESP-NOW receive callback (`espNowRecvCallback` in
+`multi_box_controller.cpp`) only validates packet size and pushes to a FreeRTOS queue — it never
+touches GPIO/NVS/UI directly, since it runs off the WiFi driver's own task. `MultiBoxController::
+update()` (called from `MultiBox::update()`, every main-loop tick) drains that queue (bounded to
+10/tick) and does the real validation: unknown sender MAC → reject; per-sender sequence number
+that isn't strictly newer (`NodeManager::acceptSequence()`, wraparound-safe signed-delta compare)
+→ reject as duplicate/stale; a queued event older than 3s by the time it's dequeued → dropped
+(guards a backlog scenario, not the normal case since the queue drains every ~10ms loop). Clocks
+are **not** synchronized across boxes — the packet's `timestamp` field is sender-local `millis()`,
+informational only; staleness is enforced from each receiver's own receive-time bookkeeping, not
+by comparing timestamps across devices.
+
+**Pairing**: CONNECTION screen's "Pair / Add Node" broadcasts `HELLO`; any box with a role
+configured replies `HELLO_ACK` carrying its own node id + self-reported role, so the requesting
+box's scan-results list already knows what it found — there's no manual "assign this peer's role"
+step, the peer's own role config is trusted as-is. All ESP-NOW traffic is **unencrypted** and
+pinned to a hardcoded fixed WiFi channel (`MB_ESPNOW_CHANNEL` = 1 in `multi_box_controller.cpp`)
+since none of these boxes ever join a real AP and there's no other authority to agree on a
+channel — this was a deliberate v1 simplification (documented, not silently assumed): revisit if
+range/interference problems show up, or if the "anyone in radio range can inject session commands"
+exposure needs closing (ESP-NOW's own per-peer encryption is available but caps encrypted peers at
+6, vs 20 unencrypted — a real hardware limit, not a config knob).
+
+**Never-sleep-mid-shot**: `_multi_box_loop()` (`factory_test_multi_box.cpp`) calls
+`DisplayPowerSave::keepAwake()` directly (bypassing the shared `_display_power_save_tick()`
+helper, same way the SLEEP/WAKE countdown popup does) whenever `session == EXPOSING`, so the
+screen never dims mid-exposure. This only covers the display-dim engine — `SleepWeekScheduler`'s
+RTC-driven power-off is a separate, global mechanism (ticked every frame regardless of mode) with
+no per-mode veto hook in this codebase; MULTI BOX does not add one, so a scheduled deep-sleep could
+in principle still fire mid-session. Flagged here rather than silently patched around, since
+building that veto would mean touching shared scheduler code outside this feature's scope.
+
+Long-press on MAIN opens an `EXIT MULTI BOX?` confirm (`CANCEL`/`OK`, defaults to `CANCEL`) instead
+of exiting immediately — this reuses the project's existing ~1.5s long-press threshold
+(`_read_mode_button_event()`'s default), not a separate 3-second timer. `OK` runs
+`MultiBoxController::requestExit()`: force-closes any open bulb, broadcasts `DISARM` to every
+paired node, then `esp_now_deinit()` + `WiFi.mode(WIFI_OFF)` before the mode actually exits.
+Removing a peer (CONNECTION → Nodes → press) only drops it from the pairing list — it never resets
+that peer's own role/config, since it's a different physical box.
 
 ### OTA update
 
