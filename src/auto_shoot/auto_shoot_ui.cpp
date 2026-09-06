@@ -6,9 +6,12 @@
  *   MAIN     — Burst, Cooldown, Advance (opens the submenu below), START/STOP.
  *              Pure mode by default: no range restriction, freed-up space
  *              used for a bigger live status readout.
- *   ADVANCE  — Range Filter ON/OFF, Range Min, Range Max. Turning the
- *              filter ON restores the exact original [Min, Max] band-pass
- *              behavior and its zone-bar visualization.
+ *   ADVANCE  — Range Filter ON/OFF, Range Min, Range Max, Retrigger (cm).
+ *              Turning the filter ON restores the exact original [Min, Max]
+ *              band-pass behavior and its zone-bar visualization. Retrigger
+ *              is the minimum in-zone distance change that counts as "moved"
+ *              for the continuous-retrigger logic -- applies regardless of
+ *              whether the filter is on.
  */
 
 #include "auto_shoot.h"
@@ -332,7 +335,10 @@ void renderAutoShootAdvanceScreen() {
     _ft->_canvas->setTextColor(COLOR_TEXT);
     _ft->_canvas->drawString("<", 5, 2);
 
-    _ft->_canvas->drawRoundRect(8, 22, 224, 70, 5, COLOR_BORDER);
+    // 4 rows now (was 3) -- Retrigger added below Range Max, so the panel
+    // is taller (88, matching the MAIN screen's original 4-row height)
+    // than the Advance screen's earlier 3-row 70.
+    _ft->_canvas->drawRoundRect(8, 22, 224, 88, 5, COLOR_BORDER);
     _ft->_canvas->setFont(&fonts::efontCN_16);
 
     bool filtered = autoShoot.config.filterEnabled;
@@ -361,16 +367,22 @@ void renderAutoShootAdvanceScreen() {
     snprintf(buf, sizeof(buf), "%.1f m", autoShoot.config.rangeMax);
     renderAdvanceItem(2, "Range Max", buf);
 
-    // Live zone bar right under the panel — see it update as you drag
-    // Range Min/Max, exactly like the MAIN screen's copy.
-    renderZoneBar(10, 96, 220, 8);
+    // Row 3: Retrigger distance (cm) -- minimum in-zone movement that
+    // counts as "moved" for the continuous-retrigger logic. Independent of
+    // the Range Filter above (applies whether it's on or off).
+    snprintf(buf, sizeof(buf), "%dcm", autoShoot.config.retriggerDeltaCm);
+    renderAdvanceItem(3, "Retrigger", buf);
+
+    // Live zone bar + footer hint, in the space freed below the now-taller
+    // (4-row) panel. See it update as you drag Range Min/Max.
+    renderZoneBar(10, 112, 220, 6);
 
     _ft->_canvas->setFont(&fonts::efontCN_10);
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(COLOR_BORDER);
     _ft->_canvas->drawString(filtered ? "Filter ON: only [Min,Max] counts"
                                        : "Filter OFF: Min/Max have no effect",
-                              12, 108);
+                              12, 122);
 }
 
 void renderAdvanceItem(uint8_t index, const char* label, const char* valueStr) {

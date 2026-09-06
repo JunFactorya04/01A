@@ -18,6 +18,15 @@ struct AutoShootConfig {
     float rangeMax = 8.0f;      // meters — only applied when filterEnabled
     uint8_t burstShots = 1;     // 1-10 shots
     uint16_t cooldownMs = 0;    // milliseconds — default 0: fire as fast as the cooldown gate allows
+
+    // Minimum in-zone distance change (cm) that counts as "the object
+    // moved" for checkAndTrigger()'s continuous-retrigger logic. Below
+    // this, a reading change is treated as sensor noise, not real
+    // movement. User-tunable (Advance submenu) since the right value
+    // genuinely depends on the deployment's own sensor noise / reflectivity,
+    // not something guessable from code alone. Applies regardless of
+    // whether the Range Filter is on or off.
+    int retriggerDeltaCm = 15;  // 2-100cm
 };
 
 // ============ STATE STRUCTURE ============
@@ -57,7 +66,7 @@ struct EditMode {
     } screen = MAIN;
 
     uint8_t selectedIndex = 0;  // MAIN: 0=Burst 1=Cooldown 2=Advance 3=START 4=STOP
-    uint8_t advanceIndex = 0;   // ADVANCE: 0=Filter ON/OFF 1=Range Min 2=Range Max
+    uint8_t advanceIndex = 0;   // ADVANCE: 0=Filter ON/OFF 1=Range Min 2=Range Max 3=Retrigger
     unsigned long enterTime = 0;
 };
 

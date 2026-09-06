@@ -11,12 +11,6 @@
 #include <Preferences.h>
 #include <math.h>
 
-// Minimum in-zone distance change (meters) that counts as "the object moved"
-// for the continuous-retrigger logic in checkAndTrigger(). Must be well
-// above TF-Luna's normal read-to-read noise (a few cm) so a stationary
-// object sitting in the zone doesn't keep re-firing on jitter alone.
-#define AUTOSHOOT_RETRIGGER_DELTA_M 0.15f
-
 // Global instance
 AutoShoot autoShoot;
 
@@ -63,6 +57,7 @@ void AutoShoot::loadConfig() {
     config.rangeMax = prefs.getFloat("maxR", 8.0f);
     config.burstShots = prefs.getInt("burst", 1);
     config.cooldownMs = prefs.getInt("cooldown", 0);
+    config.retriggerDeltaCm = prefs.getInt("retrigCm", 15);
 
     prefs.end();
 
@@ -78,6 +73,7 @@ void AutoShoot::saveConfig() {
     prefs.putFloat("maxR", config.rangeMax);
     prefs.putInt("burst", config.burstShots);
     prefs.putInt("cooldown", config.cooldownMs);
+    prefs.putInt("retrigCm", config.retriggerDeltaCm);
 
     prefs.end();
 }
@@ -105,6 +101,11 @@ void AutoShoot::validateConfig() {
     // Clamp Cooldown (0 = no delay between bursts)
     if (config.cooldownMs < 0) config.cooldownMs = 0;
     if (config.cooldownMs > 5000) config.cooldownMs = 5000;
+
+    // Clamp Retrigger distance (below 2cm is basically pure sensor noise,
+    // not real movement)
+    if (config.retriggerDeltaCm < 2) config.retriggerDeltaCm = 2;
+    if (config.retriggerDeltaCm > 100) config.retriggerDeltaCm = 100;
 }
 
 // ============ MAIN UPDATE ============
@@ -156,7 +157,8 @@ void AutoShoot::checkAndTrigger() {
 
         bool justEntered = !state.wasInRange;                                  // rising edge
         float moved = fabsf(state.currentDistance - state.lastTriggerDistance);
-        bool movedInZone = !justEntered && (moved >= AUTOSHOOT_RETRIGGER_DELTA_M);
+        float retriggerDeltaM = (float)config.retriggerDeltaCm / 100.0f;
+        bool movedInZone = !justEntered && (moved >= retriggerDeltaM);
 
         if (cooldownOk && (justEntered || movedInZone)) {
             triggerBurst(config.burstShots);   // fire N shots per config
@@ -209,9 +211,9 @@ void AutoShoot::triggerBurst(uint8_t count) {
 void AutoShoot::handleEncoderRotate(int delta) {
     if (editMode.state == EditMode::SELECTING) {
         if (editMode.screen == EditMode::ADVANCE) {
-            // ADVANCE: 0=Filter ON/OFF, 1=Range Min, 2=Range Max
+            // ADVANCE: 0=Filter ON/OFF, 1=Range Min, 2=Range Max, 3=Retrigger
             int newIndex = editMode.advanceIndex + (delta > 0 ? 1 : -1);
-            if (newIndex >= 0 && newIndex <= 2) {
+            if (newIndex >= 0 && newIndex <= 3) {
                 editMode.advanceIndex = newIndex;
             }
             return;
@@ -229,15 +231,19 @@ void AutoShoot::handleEncoderRotate(int delta) {
         else if (delta < 0) delta = -1;
 
         if (editMode.screen == EditMode::ADVANCE) {
-            // Only Range Min (1) / Range Max (2) are ever edited here —
-            // identical logic to the original Range Min/Max editing
-            // (validateConfig() below still clamps/auto-swaps exactly as
-            // before), just relocated from the main screen into this
-            // submenu.
+            // Range Min (1) / Range Max (2) — identical logic to the
+            // original Range Min/Max editing (validateConfig() below still
+            // clamps/auto-swaps exactly as before), just relocated from
+            // the main screen into this submenu. Retrigger (3) is plain
+            // +-1cm/click, deliberately NOT speed-scaled — see the comment
+            // in CLAUDE.md about why Auto Shoot's encoder steps stay at
+            // their original, hardware-confirmed-stable form.
             if (editMode.advanceIndex == 1) {          // Range Min
                 config.rangeMin += (delta * 0.1f);
             } else if (editMode.advanceIndex == 2) {    // Range Max
                 config.rangeMax += (delta * 0.1f);
+            } else if (editMode.advanceIndex == 3) {    // Retrigger distance (cm)
+                config.retriggerDeltaCm += delta;
             }
             validateConfig();
             return;
@@ -265,7 +271,7 @@ void AutoShoot::handleButtonPress() {
                 config.filterEnabled = !config.filterEnabled;
                 saveConfig();
             } else {
-                // Range Min (1) / Range Max (2) — enter EDITING
+                // Range Min (1) / Range Max (2) / Retrigger (3) — enter EDITING
                 editMode.state = EditMode::EDITING;
                 editMode.enterTime = millis();
             }
@@ -341,6 +347,7 @@ const char* AutoShoot::getSelectedItemName() {
             case 0: return "Range Filter";
             case 1: return "Range Min";
             case 2: return "Range Max";
+            case 3: return "Retrigger";
             default: return "Unknown";
         }
     }
@@ -357,6 +364,7 @@ float AutoShoot::getSelectedValue() {
         switch (editMode.advanceIndex) {
             case 1: return config.rangeMin;
             case 2: return config.rangeMax;
+            case 3: return (float)config.retriggerDeltaCm;
             default: return 0.0f;
         }
     }
