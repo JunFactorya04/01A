@@ -104,7 +104,10 @@ sensor warm-up, treat it as a real regression risk, not a free win, and verify o
 keeping it.
 
 `begin()` now does two more things before `configureFrameRate()`, both scoped entirely inside
-`begin()` and never touching `update()`'s detection/polling logic:
+`begin()` and never touching `update()`'s detection/polling logic. **Hardware-confirmed**: 20
+consecutive full power cycles all booted cleanly straight to 200Hz, where before this the sensor
+would intermittently fail to come up or fall back to 100Hz — this is a verified fix, not just a
+plausible theory.
 
 1. **`recoverStuckI2CBus()`** — if TF-Luna was mid-transmission when the ESP32 last reset/lost
    power, it can be left holding SDA low forever, waiting for clock pulses a freshly-booted
