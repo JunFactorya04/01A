@@ -98,6 +98,28 @@ bool CanonBLE::connectTo(const String& addr, bool doHandshake) {
         return false;
     }
 
+    if (doHandshake) {
+        // MITM pairing is negotiated lazily by the bluedroid stack once a
+        // GATT operation on an encrypted attribute is attempted — but
+        // c_authDone/c_authOk (set by CanonSecurityCB::onAuthenticationComplete)
+        // were previously never checked, so a failed/incomplete pairing
+        // still fell through to "paired & saved". Block here until the
+        // stack reports the outcome (bounded, matches furble's explicit
+        // secureConnection() intent) before touching the pairing characteristic.
+        unsigned long deadline = millis() + 10000UL;
+        while (!c_authDone && millis() < deadline) delay(20);
+        if (!c_authDone) {
+            Serial.println("[CanonBLE] auth timed out");
+            c_client->disconnect();
+            return false;
+        }
+        if (!c_authOk) {
+            Serial.println("[CanonBLE] auth failed");
+            c_client->disconnect();
+            return false;
+        }
+    }
+
     BLERemoteService* svc = c_client->getService(CANON_SERVICE_UUID);
     if (!svc) {
         Serial.println("[CanonBLE] service not found");

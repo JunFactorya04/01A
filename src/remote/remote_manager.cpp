@@ -8,6 +8,7 @@
 #include "drivers/sony/sony_ble.h"
 #include "drivers/canon/canon_ble.h"
 #include "drivers/nikon/nikon_ble.h"
+#include "drivers/fuji/fuji_ble.h"
 #include <BLEDevice.h>
 #include <Preferences.h>
 
@@ -22,12 +23,14 @@ namespace {
     SonyBLE  s_sony;
     CanonBLE s_canon;
     NikonBLE s_nikon;
+    FujiBLE  s_fuji;
 
     CameraDriver* driverFor(CameraBrand b) {
         switch (b) {
             case CameraBrand::Sony:  return &s_sony;
             case CameraBrand::Canon: return &s_canon;
             case CameraBrand::Nikon: return &s_nikon;
+            case CameraBrand::Fuji:  return &s_fuji;
             default:                 return nullptr;
         }
     }
@@ -40,7 +43,7 @@ void loadConfig() {
     p.begin(NVS_NS, true);
     uint8_t b = p.getUChar(KEY_BRAND, 0);
     p.end();
-    if (b > 3) b = 0;
+    if (b > 4) b = 0;
     s_brand = (CameraBrand)b;
     s_loaded = true;
 }
@@ -71,6 +74,7 @@ const char* brandName(CameraBrand brand) {
         case CameraBrand::Sony:  return "SONY";
         case CameraBrand::Canon: return "CANON";
         case CameraBrand::Nikon: return "NIKON";
+        case CameraBrand::Fuji:  return "FUJI";
         default:                 return "GPIO";
     }
 }

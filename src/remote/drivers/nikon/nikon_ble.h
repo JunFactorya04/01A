@@ -1,7 +1,11 @@
 /**
  * @file nikon_ble.h
- * @brief Nikon BLE camera remote driver (ML-L7 emulation) — EXPERIMENTAL
- * @date 2026-07-23
+ * @brief Nikon BLE camera remote driver (ML-L7 "Remote" protocol, client role)
+ * @date 2026-09-06
+ *
+ * Full rewrite of the previous EXPERIMENTAL server-role driver — see
+ * nikon_protocol.h for why (wrong BLE role, wrong service UUID, no real
+ * pairing handshake). ESP32 is now the BLE client, matching Sony/Canon/Fuji.
  */
 
 #pragma once
@@ -11,7 +15,6 @@ class NikonBLE : public CameraDriver {
 public:
     const char* name() const override { return "NIKON"; }
 
-    // Advertise as ML-L7 and wait scanSeconds for camera to connect
     bool pair(unsigned int scanSeconds) override;
     bool connect() override;
     bool isConnected() override;
@@ -25,6 +28,7 @@ public:
     void forgetCamera() override;
 
 private:
-    bool startServer();
-    bool waitForCamera(unsigned int seconds);
+    bool connectTo(const String& addr);
+    bool ensureConnected();
+    bool runHandshake();
 };

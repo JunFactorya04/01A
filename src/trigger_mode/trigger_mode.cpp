@@ -226,7 +226,7 @@ void TriggerMode::handleButtonPress() {
                 btStatus[0] = '\0';
                 break;
             case 1: {  // cycle driver: GPIO -> SONY -> CANON -> NIKON
-                uint8_t b = ((uint8_t)RemoteManager::getBrand() + 1) % 4;
+                uint8_t b = ((uint8_t)RemoteManager::getBrand() + 1) % 5;
                 RemoteManager::setBrand((CameraBrand)b);
                 btStatus[0] = '\0';
                 break;

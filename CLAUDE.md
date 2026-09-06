@@ -313,11 +313,12 @@ GREEN/RED/YELLOW. New mode UIs should follow this layout rather than inventing a
 ### BLE camera remote
 
 `CameraDriver` (`src/remote/camera_driver.h`) is an abstract interface implemented per brand in
-`src/remote/drivers/{sony,canon,nikon}/`; `RemoteManager` (`src/remote/remote_manager.cpp`)
+`src/remote/drivers/{sony,canon,nikon,fuji}/`; `RemoteManager` (`src/remote/remote_manager.cpp`)
 selects the active brand (persisted in NVS) and routes `triggerPhoto()`/`pairCamera()` to it.
 This is exposed to the rest of the firmware as `TriggerMode`'s third channel
 (`fireBluetoothIfEnabled()`), fired after the G1/G2 GPIO pulse so BLE latency never affects pulse
-timing.
+timing. `CameraBrand` cycling in `TriggerMode::handleButtonPress()` uses `% 5` (None/Sony/Canon/
+Nikon/Fuji) — update this modulus if another brand is ever added.
 
 **Do not switch Sony's `writeValue()` calls to write-without-response** (`false`) — tried once
 (all 4 commands in the half-press/full-press/release sequence) to cut BLE ack round-trip latency,
@@ -326,6 +327,50 @@ Reverted back to write-with-response (`true`). If revisiting Sony BLE latency, t
 timing constants alone (without touching the write-response mode) were not re-tried in isolation
 after this — that remains an open, untested option; changing the response mode is the one
 confirmed dead end.
+
+Canon, Nikon, and Fuji were all overhauled/added by comparing against the reference project
+github.com/gkoh/furble (a mature multi-brand ESP32 BLE remote using NimBLE; ported to this
+project's classic Arduino `BLEDevice` bluedroid client — furble's client-only APIs like
+`secureConnection()` don't exist here and had to be approximated). None of the three have been
+verified against a real camera yet — all three need real-hardware confirmation before being
+trusted, same as any other BLE protocol change in this codebase.
+
+**Canon** (`src/remote/drivers/canon/`): UUIDs and command bytes already matched furble exactly,
+so the driver was not rewritten — one real bug was found and fixed instead. `CanonSecurityCB::
+onAuthenticationComplete()` set `c_authDone`/`c_authOk` but `connectTo()` never read them, so a
+failed or still-in-progress MITM pairing fell through to writing the pairing characteristic and
+reporting "paired & saved" anyway. `connectTo()` now blocks (10s timeout) on `c_authDone` and
+aborts on `!c_authOk` before touching the pairing characteristic when `doHandshake` is true — this
+mirrors furble's explicit `secureConnection()` call (make sure encryption actually succeeded
+before proceeding) using the callback-based API classic `BLEDevice` actually exposes.
+
+**Nikon** (`src/remote/drivers/nikon/`) was a full rewrite, not a patch — the previous
+EXPERIMENTAL driver had ESP32 as a BLE **server** advertising as "ML-L7" and passively waiting for
+the camera to connect, with a standard-SIG-base service UUID and no real pairing handshake at all.
+Comparing against furble's `NikonBase`/`NikonRemote` (verified working against a Nikon Coolpix
+B600) showed all three of those were wrong: the camera is the BLE server, ESP32 must be the
+**client** connecting to it; the real service UUID has a Nikon-specific 128-bit base
+(`0000de00-3dd4-4255-8d62-6dc7b9bd5561`, not the SIG base `...-0000-1000-8000-00805f9b34fb`); and
+the camera requires a real 4-message handshake (stage 1 we send `{stage,timestamp,id}` -> stage 2
+camera echoes an all-zero ack -> stage 3 we send an all-zero message -> stage 4 camera responds
+with its serial number) before it will honor any shutter command. Critically, **this handshake is
+not a one-time pairing step** — furble re-runs it on every single connection, keyed off a
+device/nonce "identity" chosen once at `pair()` time and persisted (NVS key `nikonId`) so every
+reconnect's handshake reuses the same identity the camera first accepted. The new driver mirrors
+furble's `NikonRemote` variant specifically (there's also a `NikonSmart` variant in furble for a
+different pairing mode, not ported). `focus()` is a no-op (returns `ensureConnected()` only) —
+the Remote/ML-L7 protocol has no separate half-press command, matching furble.
+
+**Fuji** (`src/remote/drivers/fuji/`) is brand new — no prior driver existed. Fujifilm has two
+protocol variants in furble: **Basic** (unsecured, 4-byte pairing token broadcast in the camera's
+BLE advertisement manufacturer data, works on older X/GFX firmware) and **Secure** (firmware from
+~mid-2025 on, dozens of undocumented characteristics, far more complex). Only **Basic** was
+implemented — it fits this project's existing 3-file driver shape (scan by manufacturer data ->
+connect -> write token + our name -> get shutter characteristic), while Secure would need
+substantially more reverse-engineering than furble's own source documents. If a paired Fuji camera
+turns out to be running new-enough firmware to require Secure, `pair()` will simply fail to find a
+match (the Basic scan filter checks for the token-bearing manufacturer data and one of two specific
+secondary service UUIDs) — there is no fallback or detection message for that case yet.
 
 ### OTA update
 

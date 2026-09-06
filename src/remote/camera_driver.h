@@ -16,6 +16,7 @@ enum class CameraBrand : uint8_t {
     Sony  = 1,
     Canon = 2,
     Nikon = 3,
+    Fuji  = 4,
 };
 
 class CameraDriver {
