@@ -103,6 +103,31 @@ hardware (the boot placement also risked brownout on a weak battery — see belo
 sensor warm-up, treat it as a real regression risk, not a free win, and verify on hardware before
 keeping it.
 
+`begin()` now does two more things before `configureFrameRate()`, both scoped entirely inside
+`begin()` and never touching `update()`'s detection/polling logic:
+
+1. **`recoverStuckI2CBus()`** — if TF-Luna was mid-transmission when the ESP32 last reset/lost
+   power, it can be left holding SDA low forever, waiting for clock pulses a freshly-booted
+   master will never send. **No I2C transaction can succeed while this holds — including
+   `softResetSensor()`, which is itself an I2C write** — so the self-heal path
+   (`begin()` + `softResetSensor()`) could never actually recover a truly stuck bus on its own;
+   it would just retry forever. Whether a given boot hits this depends on the exact timing of the
+   prior power-down relative to the sensor's I2C cycle, which is why the sensor coming up cleanly
+   was inconsistent run to run. Standard fix (same procedure ESPHome's own I2C recovery uses):
+   before `Wire1.begin()` ever takes the pins, manually toggle SCL as GPIO up to 20 times to walk
+   a stuck slave through releasing SDA, then issue a manual STOP condition. Near-zero cost when
+   the bus is already idle (returns immediately on the first check). If SCL itself were ever
+   found stuck (not just SDA), this can't fix it — that needs an actual power cycle — and the
+   routine doesn't try to special-case that, it just falls through to a `Wire1.begin()` that will
+   still fail the same as before this existed.
+2. **A bounded, paced ready-wait** (up to 10 attempts, 10ms apart — the sensor's own native frame
+   pace, deliberately *not* the old `warmUp()`'s tight busy-loop) between `Wire1.begin()` and
+   `configureFrameRate()`. TF-Luna needs real time after power-up to settle before it will answer;
+   querying it before that made `configureFrameRate()`'s write/readback fail and permanently miss
+   the 200Hz upgrade for that session (the "sometimes falls back to 100Hz" symptom). Hard-capped
+   so `begin()` can never hang — a sensor that still isn't answering after 10 tries just falls
+   through to `update()`'s existing pacing/backoff/self-heal, exactly as before this existed.
+
 ### Auto Shoot: pure mode (default) vs. the Advance range filter
 
 `AutoShoot` has two screens (`EditMode::Screen`, same MAIN/sub-screen split as TriggerMode's
