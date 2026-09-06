@@ -145,10 +145,14 @@ both MAIN (always, to give a passive glance at mode/zone) and ADVANCE (for live 
 tuning Min/Max) — highlighted zone segment only appears when the filter is enabled.
 
 `AutoShoot::checkAndTrigger()` fires on entry into detection (rising edge) AND keeps re-firing
-(cooldown-paced, `AUTOSHOOT_RETRIGGER_DELTA_M` = 0.15m) while the measured distance keeps changing
-during a continuous detection — a pure rising-edge design previously meant a long object that
-never fully left detection would fire exactly once and never again. `cooldownMs` defaults to 0
-(was 500) and its encoder step is 10ms (was 50ms) for finer control near that low default.
+(cooldown-paced) while the measured distance keeps changing during a continuous detection — a
+pure rising-edge design previously meant a long object that never fully left detection would fire
+exactly once and never again. The minimum-movement threshold for that retrigger
+(`config.retriggerDeltaCm`, default 15cm) is user-configurable in Advance (4th row, alongside
+Range Filter/Min/Max) rather than a hardcoded constant — the right value depends on the
+deployment's own sensor noise/reflectivity, not something guessable from code. Applies regardless
+of whether the Range Filter is on. `cooldownMs` defaults to 0 (was 500) and its encoder step is
+10ms (was 50ms) for finer control near that low default.
 
 Everything else about Auto Shoot's editing UX (encoder step size elsewhere, START/STOP as two
 separate buttons rather than a merged toggle, range-edit clamping instead of swapping) was
