@@ -50,6 +50,12 @@ BLE camera remote + optional ESP-NOW multi-box coordination.
   requires.
 - **Fuji** — new driver (Basic/unsecured pairing protocol).
 
+## Build / versioning
+
+- The Info screen and OTA screen's "Current" version now come from `git describe --tags`,
+  stamped automatically at build time — no more hand-typed version literals to forget to
+  bump (three of them had drifted to "v1.3" independently before this release).
+
 ## Known limitations
 
 - Canon, Nikon, and Fuji BLE drivers have not yet been verified against real cameras —

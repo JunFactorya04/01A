@@ -31,6 +31,18 @@ verification is "does it build" (`pio run`) plus manual testing on hardware.
 the higher speed reliably produced `Serial data stream stopped: Possible serial noise or
 corruption` on this hardware setup. Drop to `115200` if uploads still fail.
 
+The version shown on the Setting > Info screen and the OTA screen's "Current: vX.X" line comes
+from `GEOPIX_FW_VERSION` (`src/common/version.h`), which `tools/version.py` (a PlatformIO
+`extra_scripts = pre:` hook) stamps at every build from `git describe --tags --always --dirty` —
+clean `v1.4` when built exactly at that tag, `v1.4-3-gabc1234[-dirty]` otherwise. **Before cutting
+a release, retag so the release commit is exactly what gets built** (`git tag -f -a vX.Y -F
+RELEASE_NOTES_vX.Y.md <commit>` then `git push --force origin vX.Y`) — building from a commit
+that's merely *near* a tag still stamps the messy `-N-g<hash>` form. This replaced three
+independent hardcoded literal version strings (this file's Info screen, `ota_update.h`'s old
+`GEOPIX_FW_VERSION "v1.3"`, `factory_test.h`'s `FW_VERISON "v0.1"` on the legacy QA screen) that
+had drifted out of sync with each other and with the real release — that's the bug this exists to
+prevent, not a hypothetical one.
+
 Git history starts at commit `checkpoint: stable baseline before TF-Luna I2C frame-rate change`
 (tag `stable-before-fps-change`) — there is no earlier history. Before a change with real
 hardware-regression risk (sensor timing/registers, power-on sequencing, anything hard to verify
