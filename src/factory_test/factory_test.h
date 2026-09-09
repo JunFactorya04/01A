@@ -23,8 +23,9 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
+#include "../common/version.h"
 
-#define FW_VERISON "v0.1"
+#define FW_VERISON GEOPIX_FW_VERSION   // legacy name, kept for ft_key_test.cpp
 #define BUZZ_PIN 3
 #define POWER_HOLD_PIN 46
 

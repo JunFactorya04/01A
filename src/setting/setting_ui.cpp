@@ -9,6 +9,7 @@
 #include "../common/ui_theme.h"   // themed palette
 #include "../sleep_week/sleep_week_ui.h"
 #include "../display_mode/display_mode.h"   // Brightness/Power Save/Theme/Rotation values + uiThemeName()
+#include "../common/version.h"
 #include <smooth_ui_toolkit.h>
 #include <time.h>
 
@@ -82,7 +83,7 @@ static void renderInfoScreen() {
     _ft->_canvas->setTextColor(COLOR_TEXT);
     _ft->_canvas->drawString("Version:", 12, 70);
     _ft->_canvas->setTextColor(COLOR_GREEN);
-    _ft->_canvas->drawString("v1.3", 70, 70);
+    _ft->_canvas->drawString(GEOPIX_FW_VERSION, 70, 70);
 
     // ── Copyright ──
     _ft->_canvas->setFont(&fonts::efontCN_10);
