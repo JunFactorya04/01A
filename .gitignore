@@ -6,3 +6,7 @@
 .cache/
 .DS_Store
 compile_commands.json
+
+# Locally-built flashable release binaries (mass-flashing packages) --
+# distributed via GitHub Releases instead of committed to the source tree.
+releases/
