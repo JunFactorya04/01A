@@ -277,6 +277,23 @@ bool NikonBLE::focus() {
     return ensureConnected();
 }
 
+// Bulb hold: same CMD_PRESS the ML-L7 protocol uses for a normal shutter
+// press, just without the fixed hold delay -- the camera (in its own Bulb
+// mode) keeps the shutter open until CMD_RELEASE arrives.
+bool NikonBLE::shutterPress() {
+    if (!ensureConnected()) return false;
+    uint8_t down[2] = {NIKON_MODE_SHUTTER, NIKON_CMD_PRESS};
+    n_shutter->writeValue(down, 2, true);
+    return true;
+}
+
+bool NikonBLE::shutterRelease() {
+    if (!isConnected()) return false;
+    uint8_t up[2] = {NIKON_MODE_SHUTTER, NIKON_CMD_RELEASE};
+    n_shutter->writeValue(up, 2, true);
+    return true;
+}
+
 bool NikonBLE::hasPairedCamera() {
     Preferences p;
     p.begin(NVS_NS, true);

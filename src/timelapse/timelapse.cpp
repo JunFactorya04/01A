@@ -166,12 +166,20 @@ void Timelapse::triggerCamera() {
 // ============ BULB EXPOSURE (non-blocking long hold) ============
 // Starts a HELD trigger pulse for config.bulbExposureSec instead of the
 // usual ~6ms tap. The camera must already be set to BULB mode by the
-// photographer; holding G1/G2 closed is what keeps its shutter open. Only
-// G1/G2 fire here -- the BLE channel is intentionally skipped for the
-// whole bulb sequence (see endBulbExposure()) since it can't honor bulb
-// timing and firing it would just add an uncontrolled second shot on top
-// of the held exposure. Real bulb timing only works through the physical
-// G1/G2 cable.
+// photographer; holding G1/G2 closed (or the BLE shutter-press, see below)
+// is what keeps its shutter open.
+//
+// BLE fires a real press-and-hold here too (RemoteManager::pressShutter(),
+// released in endBulbExposure()/forceReleaseBulbIfExposing()) -- it used to
+// be skipped entirely during bulb because CameraDriver only exposed a
+// one-shot trigger(), which would have landed as an uncontrolled second
+// shot on top of the held exposure. Now that shutterPress()/shutterRelease()
+// exist as real hold primitives (mirroring each driver's own
+// press-then-delay-then-release trigger() sequence, just without the fixed
+// delay), BLE can hold exactly like G1/G2 does. This is UNVERIFIED against
+// real camera hardware for a multi-second hold -- confirmed only by static
+// protocol review (Sony/Canon/Nikon/Fuji's existing trigger() commands
+// decompose cleanly into press/release pairs), not a live bulb exposure.
 void Timelapse::startBulbExposure() {
     if (!acquireTriggerLock()) return;   // retry next tick; nothing advances meanwhile
 
@@ -184,6 +192,7 @@ void Timelapse::startBulbExposure() {
 
     if (fireG2) digitalWrite(TRIGGER_G2_PIN, HIGH);
     if (fireG1) digitalWrite(TRIGGER_G1_PIN, HIGH);
+    triggerMode.pressBluetoothShutterIfEnabled();
     if (triggerMode.config.beepEnabled && g_speakerEnabled) tone(BUZZ_PIN, 2500, 60);   // "exposure started" cue
 
     state.isExposing        = true;
@@ -205,19 +214,10 @@ void Timelapse::startBulbExposure() {
 void Timelapse::endBulbExposure() {
     if (state.bulbFiredG2) digitalWrite(TRIGGER_G2_PIN, LOW);
     if (state.bulbFiredG1) digitalWrite(TRIGGER_G1_PIN, LOW);
+    triggerMode.releaseBluetoothShutterIfEnabled();
     if (triggerMode.config.beepEnabled && g_speakerEnabled) tone(BUZZ_PIN, 1500, 60);   // "exposure done" cue
 
     releaseTriggerLock();
-
-    // Deliberately NOT firing the BLE channel here. BLE has no held/bulb
-    // command (CameraDriver only exposes one-shot trigger()), so it would
-    // only ever be able to send a normal instant "take photo" -- during a
-    // bulb sequence that meant a second, uncontrolled shot landing right
-    // as/after the cable-held exposure ended (effectively firing two
-    // trigger paths "in parallel" on the same camera). Bulb mode is
-    // exclusive to the physical G1/G2 hold; BLE is skipped entirely while
-    // config.bulbEnabled is on rather than fire a shot it can't time
-    // correctly anyway.
 
     state.isExposing = false;
     state.shotCount++;
@@ -235,10 +235,11 @@ void Timelapse::forceReleaseBulbIfExposing() {
 
     if (state.bulbFiredG2) digitalWrite(TRIGGER_G2_PIN, LOW);
     if (state.bulbFiredG1) digitalWrite(TRIGGER_G1_PIN, LOW);
+    triggerMode.releaseBluetoothShutterIfEnabled();   // never leave the BLE shutter held either
     releaseTriggerLock();
     state.isExposing = false;
-    // Deliberately NOT counted as a completed shot (no shotCount++) and no
-    // BLE fire — it was cut short, not a real capture.
+    // Deliberately NOT counted as a completed shot (no shotCount++) — it
+    // was cut short, not a real capture.
 }
 
 // ============ VIDEO CALCULATOR HELPERS ============

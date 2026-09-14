@@ -72,6 +72,12 @@ public:
     // Fire BLE camera shot if Bluetooth channel is ON and a driver selected.
     // Called by AUTO SHOOT / TIMELAPSE after the G1/G2 pulse (same command).
     void fireBluetoothIfEnabled();
+
+    // Bulb/long-exposure hold over BLE, same ON/OFF gate as
+    // fireBluetoothIfEnabled(). Used by Timelapse's Bulb Mode instead of a
+    // one-shot trigger — press at exposure start, release at exposure end.
+    void pressBluetoothShutterIfEnabled();
+    void releaseBluetoothShutterIfEnabled();
     
     // ===== UI Interaction =====
     void handleEncoderRotate(int delta);

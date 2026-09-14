@@ -36,6 +36,18 @@ public:
     virtual bool trigger() = 0;        // take one photo (auto-reconnect)
     virtual bool focus() = 0;          // half-press focus
 
+    // Bulb/long-exposure support: press and hold the shutter, release
+    // later. These send the exact same protocol commands trigger()
+    // already sends internally for its "down"/"up" steps -- just without
+    // trigger()'s own fixed delay in between, so the caller (Timelapse's
+    // Bulb Mode) controls how long the hold lasts instead of a hardcoded
+    // ms constant. Camera must be in its own Bulb (B) shooting mode for
+    // this to actually produce a long exposure -- this driver has no way
+    // to change that camera-side setting remotely, same limitation as the
+    // physical G1/G2 cable path.
+    virtual bool shutterPress() = 0;
+    virtual bool shutterRelease() = 0;
+
     virtual bool hasPairedCamera() = 0;
     virtual String pairedAddress() = 0;
     virtual void forgetCamera() = 0;   // clear saved identity

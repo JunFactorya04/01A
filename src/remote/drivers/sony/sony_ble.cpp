@@ -207,6 +207,27 @@ bool SonyBLE::focus() {
     return true;
 }
 
+// Bulb hold: same focus-then-shutter-down sequence as trigger(), but
+// SHUTTER_UP is deliberately not sent here -- the freemote protocol keeps
+// the shutter (and the camera's exposure, when it's in Bulb mode) open for
+// as long as SHUTTER_DOWN is the last state sent. shutterRelease() sends
+// the matching SHUTTER_UP/FOCUS_UP pair to close it.
+bool SonyBLE::shutterPress() {
+    if (!ensureConnected()) return false;
+    s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_DOWN, 2, true);
+    delay(SONY_FOCUS_SETTLE_MS);
+    s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_DOWN, 2, true);
+    return true;
+}
+
+bool SonyBLE::shutterRelease() {
+    if (!isConnected()) return false;   // don't reconnect just to release
+    s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_UP, 2, true);
+    delay(SONY_RELEASE_GAP_MS);
+    s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_UP, 2, true);
+    return true;
+}
+
 bool SonyBLE::hasPairedCamera() {
     Preferences p;
     p.begin(NVS_NS, true);

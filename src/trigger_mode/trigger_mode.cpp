@@ -196,6 +196,18 @@ void TriggerMode::fireBluetoothIfEnabled() {
     RemoteManager::triggerPhoto();
 }
 
+void TriggerMode::pressBluetoothShutterIfEnabled() {
+    if (!config.bluetoothEnabled) return;
+    if (RemoteManager::getBrand() == CameraBrand::None) return;
+    RemoteManager::pressShutter();
+}
+
+void TriggerMode::releaseBluetoothShutterIfEnabled() {
+    if (!config.bluetoothEnabled) return;
+    if (RemoteManager::getBrand() == CameraBrand::None) return;
+    RemoteManager::releaseShutter();
+}
+
 // ============ UI INTERACTION ============
 void TriggerMode::handleEncoderRotate(int delta) {
     if (editMode.state != TriggerEditMode::SELECTING) return;

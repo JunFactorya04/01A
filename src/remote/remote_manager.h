@@ -36,6 +36,10 @@ namespace RemoteManager {
     // ----- high-level ops (route to active driver) -----
     bool pairCamera(unsigned int scanSeconds = 10);
     bool triggerPhoto();               // returns false if not connected/paired
+    // Bulb/long-exposure hold, used by Timelapse's Bulb Mode. Camera must
+    // already be in its own Bulb (B) shooting mode.
+    bool pressShutter();               // start the hold
+    bool releaseShutter();             // end the hold
     bool isConnected();
     bool hasPairedCamera();
     void forgetCamera();

@@ -237,6 +237,23 @@ bool CanonBLE::focus() {
     return true;
 }
 
+// Bulb hold: BR-E1 emulation sends CANON_CMD_SHUTTER_DOWN and, in the
+// camera's own Bulb (B) mode, holds the shutter open for as long as
+// NEUTRAL isn't sent -- shutterRelease() sends that closing byte.
+bool CanonBLE::shutterPress() {
+    if (!ensureConnected()) return false;
+    uint8_t down = CANON_CMD_SHUTTER_DOWN;
+    c_shutter->writeValue(&down, 1, true);
+    return true;
+}
+
+bool CanonBLE::shutterRelease() {
+    if (!isConnected()) return false;
+    uint8_t up = CANON_CMD_NEUTRAL;
+    c_shutter->writeValue(&up, 1, true);
+    return true;
+}
+
 bool CanonBLE::hasPairedCamera() {
     Preferences p;
     p.begin(NVS_NS, true);

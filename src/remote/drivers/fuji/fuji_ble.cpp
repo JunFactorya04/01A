@@ -211,6 +211,21 @@ bool FujiBLE::focus() {
     return true;
 }
 
+// Bulb hold: same PRESS param trigger() uses, just without the fixed hold
+// delay -- the camera (in its own Bulb mode) keeps the shutter open until
+// the matching RELEASE param arrives.
+bool FujiBLE::shutterPress() {
+    if (!ensureConnected()) return false;
+    fujiShutterCmd(FUJI_PARAM_PRESS);
+    return true;
+}
+
+bool FujiBLE::shutterRelease() {
+    if (!isConnected()) return false;
+    fujiShutterCmd(FUJI_PARAM_RELEASE);
+    return true;
+}
+
 bool FujiBLE::hasPairedCamera() {
     Preferences p;
     p.begin(NVS_NS, true);

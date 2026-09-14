@@ -18,6 +18,8 @@ public:
 
     bool trigger() override;
     bool focus() override;
+    bool shutterPress() override;
+    bool shutterRelease() override;
 
     bool hasPairedCamera() override;
     String pairedAddress() override;

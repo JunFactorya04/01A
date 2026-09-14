@@ -206,13 +206,28 @@ cycle time (`Interval + Exposure` when Bulb is on) is computed by `perShotMs()`,
 `getEstimatedDurationSec()`/`currentDurationSecOrBootstrap()`/`solveIntervalMs()` so the MAIN
 screen's calculator accounts for exposure time rather than understating the real duration.
 `stop()`/`pause()` force-release a mid-exposure hold
-(`forceReleaseBulbIfExposing()`) so the camera's shutter is never left open indefinitely just
-because the sequence was interrupted. The BLE camera-remote channel has no held/bulb command
-(`CameraDriver` only exposes one-shot `trigger()`) and is **skipped entirely** for the whole bulb
-sequence (`endBulbExposure()` deliberately does not call `fireBluetoothIfEnabled()`) — an earlier
-version fired it anyway after the hold released, which landed as a second, uncontrolled shot
-right on top of the held exposure (two trigger paths firing "in parallel" on the same sequence).
-Bulb mode is exclusive to the physical G1/G2 hold.
+(`forceReleaseBulbIfExposing()`) so the camera's shutter (and, now, a BLE hold — see below) is
+never left open indefinitely just because the sequence was interrupted.
+
+**BLE bulb hold** (added after a user report that testing Bulb Mode over BLE did nothing at all —
+by design at the time, since `CameraDriver` only exposed one-shot `trigger()` and bulb deliberately
+skipped it rather than fire an uncontrolled second shot on top of the held G1/G2 exposure).
+`CameraDriver` now also has `shutterPress()`/`shutterRelease()`, implemented in all four drivers
+(`sony_ble.cpp`, `canon_ble.cpp`, `nikon_ble.cpp`, `fuji_ble.cpp`) by decomposing each driver's own
+existing `trigger()` press-then-delay-then-release sequence into its two halves with the delay
+removed — e.g. Sony's `shutterPress()` sends `FOCUS_DOWN`+`SHUTTER_DOWN` and stops (no
+`SHUTTER_UP`), `shutterRelease()` sends `SHUTTER_UP`+`FOCUS_UP`. `startBulbExposure()`/
+`endBulbExposure()`/`forceReleaseBulbIfExposing()` call `TriggerMode::pressBluetoothShutterIfEnabled()`/
+`releaseBluetoothShutterIfEnabled()` (same `config.bluetoothEnabled` gate as
+`fireBluetoothIfEnabled()`) alongside the G1/G2 hold — both channels can fire together during bulb
+now, matching how the non-bulb path already runs G1/G2 and BLE together. **This is unverified
+against real camera hardware for a multi-second hold** — confirmed only by static protocol review
+(each existing `trigger()` command pair decomposes cleanly, and Sony's freemote/RMT-P1BT protocol
+in particular is documented elsewhere as supporting exactly this hold-for-bulb behavior), not a
+live bulb exposure on any of the four brands. Needs hardware confirmation before being trusted,
+same as every other BLE protocol change in this codebase — and per the existing Canon/Nikon/Fuji
+caveat above, `trigger()` itself hasn't been hardware-verified on those three either, so
+`shutterPress()`/`shutterRelease()` inherit that same unverified status.
 
 The status box's realtime countdown ("next Ns" / "Bulb Ns") + fill progress bar finally puts the
 `getTimeUntilNextShot()` getter to use — it existed in the original code but was never rendered
@@ -329,7 +344,10 @@ selects the active brand (persisted in NVS) and routes `triggerPhoto()`/`pairCam
 This is exposed to the rest of the firmware as `TriggerMode`'s third channel
 (`fireBluetoothIfEnabled()`), fired after the G1/G2 GPIO pulse so BLE latency never affects pulse
 timing. `CameraBrand` cycling in `TriggerMode::handleButtonPress()` uses `% 5` (None/Sony/Canon/
-Nikon/Fuji) — update this modulus if another brand is ever added.
+Nikon/Fuji) — update this modulus if another brand is ever added. Each driver also implements
+`shutterPress()`/`shutterRelease()` (press-and-hold primitives, split out of each driver's own
+`trigger()` sequence) — see the "BLE bulb hold" paragraph in the Timelapse section above for why
+and its unverified-on-hardware status.
 
 **Do not switch Sony's `writeValue()` calls to write-without-response** (`false`) — tried once
 (all 4 commands in the half-press/full-press/release sequence) to cut BLE ack round-trip latency,

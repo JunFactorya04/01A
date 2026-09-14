@@ -114,6 +114,20 @@ bool triggerPhoto() {
     return d->trigger();
 }
 
+bool pressShutter() {
+    CameraDriver* d = driver();
+    if (!d) return false;
+    if (!d->hasPairedCamera()) return false;
+    if (!bleReady()) return false;
+    return d->shutterPress();
+}
+
+bool releaseShutter() {
+    CameraDriver* d = driver();
+    if (!d) return false;
+    return d->shutterRelease();
+}
+
 bool isConnected() {
     CameraDriver* d = driver();
     return d && s_bleInit && d->isConnected();
