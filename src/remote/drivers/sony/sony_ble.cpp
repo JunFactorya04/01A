@@ -231,6 +231,17 @@ bool SonyBLE::shutterRelease() {
     // leave it open until the next unrelated command accidentally toggles
     // it shut (this was a real reported bug).
     if (!ensureConnected()) return false;
+
+    // writeValue() returns void -- a single write with no ack visibility is
+    // not enough after the link has sat idle for the whole exposure (tens
+    // of seconds with zero traffic); the camera can be slow to respond to
+    // the very first command after that. Sending SHUTTER_UP twice (cheap:
+    // ~50ms extra against a multi-second-or-longer bulb hold) noticeably
+    // improved reliability closing the shutter on real hardware, where a
+    // single send intermittently left it open until the next shot's press
+    // happened to toggle it shut.
+    s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_UP, 2, true);
+    delay(50);
     s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_UP, 2, true);
     delay(SONY_RELEASE_GAP_MS);
     s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_UP, 2, true);

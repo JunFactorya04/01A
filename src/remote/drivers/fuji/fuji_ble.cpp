@@ -226,6 +226,11 @@ bool FujiBLE::shutterRelease() {
     // Reconnect if needed (see SonyBLE::shutterRelease() for why) -- the
     // camera's shutter is still open regardless of our BLE link state.
     if (!ensureConnected()) return false;
+    // Send twice (see SonyBLE::shutterRelease() for why) -- writeValue()
+    // can't report success, and a single write after a long idle hold
+    // intermittently failed to close the shutter on real hardware.
+    fujiShutterCmd(FUJI_PARAM_RELEASE);
+    delay(50);
     fujiShutterCmd(FUJI_PARAM_RELEASE);
     return true;
 }

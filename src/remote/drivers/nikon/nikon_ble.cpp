@@ -295,7 +295,12 @@ bool NikonBLE::shutterRelease() {
     // Note: a reconnect here re-runs the full 4-message handshake, since
     // that's not a one-time pairing step for this protocol (see connect()).
     if (!ensureConnected()) return false;
+    // Send twice (see SonyBLE::shutterRelease() for why) -- writeValue()
+    // can't report success, and a single write after a long idle hold
+    // intermittently failed to close the shutter on real hardware.
     uint8_t up[2] = {NIKON_MODE_SHUTTER, NIKON_CMD_RELEASE};
+    n_shutter->writeValue(up, 2, true);
+    delay(50);
     n_shutter->writeValue(up, 2, true);
     return true;
 }

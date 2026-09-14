@@ -252,6 +252,17 @@ same as `trigger()` itself on those three brands.
   `*_RECONNECT_SETTLE_MS` (500ms for all four, in each `*_protocol.h`), applied in `shutterPress()`
   only when `isConnected()` was false right before the reconnect (not on every press, so
   `trigger()`/`focus()`'s already-optimized single-shot latency is untouched).
+- **`shutterRelease()` sends its closing command twice.** Even with the reconnect fix above, real
+  hardware still intermittently failed to close the shutter exactly at the configured Exposure
+  time — status/countdown advanced normally (so the state machine itself was fine), but the
+  physical shutter stayed open until the next shot's `shutterPress()` happened to toggle it shut.
+  Root cause: the BLE link sits fully idle for the whole exposure (tens of seconds, zero traffic),
+  and the camera can be slow to respond to the very first command afterward — `writeValue()`
+  returns `void`, so there is no way to detect that the single send didn't land. Each driver's
+  `shutterRelease()` now sends its closing command (Sony `SHUTTER_UP`, Canon `CMD_NEUTRAL`, Nikon
+  `{MODE_SHUTTER,CMD_RELEASE}`, Fuji `PARAM_RELEASE`) **twice**, ~50ms apart, before moving on —
+  negligible cost against a multi-second-or-longer bulb hold, meaningfully better odds at least one
+  send is honored.
 
 **Settle Delay** (`TimelapseConfig::bulbSettleSec`, ADVANCE row 4, 0-120s, default 0): user-tunable
 margin for the BLE reconnect/settle behavior above, on top of the fixed 500ms already baked into
