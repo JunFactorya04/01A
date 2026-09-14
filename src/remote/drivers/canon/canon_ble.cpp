@@ -241,7 +241,9 @@ bool CanonBLE::focus() {
 // camera's own Bulb (B) mode, holds the shutter open for as long as
 // NEUTRAL isn't sent -- shutterRelease() sends that closing byte.
 bool CanonBLE::shutterPress() {
+    bool wasConnected = isConnected();
     if (!ensureConnected()) return false;
+    if (!wasConnected) delay(CANON_RECONNECT_SETTLE_MS);
     uint8_t down = CANON_CMD_SHUTTER_DOWN;
     c_shutter->writeValue(&down, 1, true);
     return true;

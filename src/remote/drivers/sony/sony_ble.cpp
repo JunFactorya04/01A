@@ -213,7 +213,9 @@ bool SonyBLE::focus() {
 // as long as SHUTTER_DOWN is the last state sent. shutterRelease() sends
 // the matching SHUTTER_UP/FOCUS_UP pair to close it.
 bool SonyBLE::shutterPress() {
+    bool wasConnected = isConnected();
     if (!ensureConnected()) return false;
+    if (!wasConnected) delay(SONY_RECONNECT_SETTLE_MS);
     s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_DOWN, 2, true);
     delay(SONY_FOCUS_SETTLE_MS);
     s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_DOWN, 2, true);

@@ -281,7 +281,9 @@ bool NikonBLE::focus() {
 // press, just without the fixed hold delay -- the camera (in its own Bulb
 // mode) keeps the shutter open until CMD_RELEASE arrives.
 bool NikonBLE::shutterPress() {
+    bool wasConnected = isConnected();
     if (!ensureConnected()) return false;
+    if (!wasConnected) delay(NIKON_RECONNECT_SETTLE_MS);
     uint8_t down[2] = {NIKON_MODE_SHUTTER, NIKON_CMD_PRESS};
     n_shutter->writeValue(down, 2, true);
     return true;

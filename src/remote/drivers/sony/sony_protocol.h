@@ -40,3 +40,13 @@ static const uint8_t SONY_RECORD_UP[]    = {0x01, 0x0E};  // movie rec up
 #define SONY_FOCUS_SETTLE_MS    20
 #define SONY_SHUTTER_HOLD_MS    100
 #define SONY_RELEASE_GAP_MS     30
+
+// A freshly (re)established GATT connection needs real time before a write
+// to it can be trusted -- writeValue() on this BLE library returns void, so
+// a write sent too soon after connect() can silently fail with no way for
+// us to detect it. Only applied in shutterPress() right after an actual
+// reconnect (not on every press), so normal quick-shot latency is
+// unaffected. Added after a bulb-mode BLE hold intermittently missed shots
+// (worse with a short Interval, i.e. less time for the link to settle
+// between the previous shot's release and this one's press).
+#define SONY_RECONNECT_SETTLE_MS 500

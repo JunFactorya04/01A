@@ -44,3 +44,7 @@
 // ===== Timing (ms) =====
 #define FUJI_SHUTTER_HOLD_MS     200
 #define FUJI_FOCUS_HOLD_MS       200
+
+// See SONY_RECONNECT_SETTLE_MS (sony_protocol.h) for why this exists. Only
+// applied in shutterPress() after an actual reconnect, not every press.
+#define FUJI_RECONNECT_SETTLE_MS 500

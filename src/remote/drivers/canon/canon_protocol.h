@@ -37,3 +37,9 @@
 // ===== Timing (ms) =====
 #define CANON_SHUTTER_HOLD_MS    200
 #define CANON_FOCUS_HOLD_MS      200
+
+// See SONY_RECONNECT_SETTLE_MS (sony_protocol.h) for why this exists: a
+// write right after a fresh (re)connect can silently fail since
+// writeValue() has no way to report that. Only applied in shutterPress()
+// after an actual reconnect, not every press.
+#define CANON_RECONNECT_SETTLE_MS 500

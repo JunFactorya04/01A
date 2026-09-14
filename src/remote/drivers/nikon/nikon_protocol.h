@@ -58,3 +58,9 @@ static const uint8_t NIKON_ZERO8[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
 // ===== Timing (ms) =====
 #define NIKON_SHUTTER_HOLD_MS    150
+
+// See SONY_RECONNECT_SETTLE_MS (sony_protocol.h) for why this exists. Only
+// applied in shutterPress() after an actual reconnect, not every press —
+// and a reconnect here also re-runs the full 4-message handshake, which
+// already takes real time on its own, so this is layered on top of that.
+#define NIKON_RECONNECT_SETTLE_MS 500

@@ -215,7 +215,9 @@ bool FujiBLE::focus() {
 // delay -- the camera (in its own Bulb mode) keeps the shutter open until
 // the matching RELEASE param arrives.
 bool FujiBLE::shutterPress() {
+    bool wasConnected = isConnected();
     if (!ensureConnected()) return false;
+    if (!wasConnected) delay(FUJI_RECONNECT_SETTLE_MS);
     fujiShutterCmd(FUJI_PARAM_PRESS);
     return true;
 }
