@@ -57,6 +57,13 @@ struct TimelapseState {
     unsigned long exposureStartTime = 0;
     bool bulbFiredG2 = false;   // which pins were actually driven HIGH at
     bool bulbFiredG1 = false;   // exposure start, so the release matches
+
+    // Settle Delay in progress: a distinct pause phase entered right after
+    // a bulb exposure ends (before the normal Interval rest even starts
+    // counting), not just extra time folded into the same countdown as
+    // Interval. Only entered when bulbSettleSec > 0.
+    bool isSettling = false;
+    unsigned long settleStartTime = 0;
 };
 
 // ============ EDIT MODE ============
@@ -126,6 +133,7 @@ public:
     int getRemainingShots() const;
     unsigned long getTimeUntilNextShot() const;   // ms until the next shot starts (0 if exposing/idle)
     unsigned long getBulbTimeRemaining() const;   // ms left in the current exposure, 0 if not exposing
+    unsigned long getSettleTimeRemaining() const; // ms left in the Settle Delay pause, 0 if not settling
     float getVideoLengthSec() const;              // totalShots / fps, -1 = infinite (totalShots == 0)
     int getVideoFps() const;                      // resolved from videoFpsIndex (24/25/30)
     bool isRunning() const;

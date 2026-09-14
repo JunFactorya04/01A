@@ -39,6 +39,7 @@ void Timelapse::init() {
     state.isRunning    = false;
     state.isPaused     = false;
     state.isExposing   = false;
+    state.isSettling   = false;
     state.lastShotTime = millis();
     state.shotCount    = 0;
 }
@@ -121,16 +122,24 @@ void Timelapse::update() {
         return;
     }
 
+    // Settle Delay: a distinct pause phase entered right after an exposure
+    // ends, strictly BEFORE the normal Interval rest even starts counting
+    // -- not extra time folded into the same countdown. Nothing about the
+    // next shot is decided until this pause fully elapses ("tạm dừng, hết
+    // thì mới tiếp tục"), same non-blocking-check shape as isExposing above.
+    if (state.isSettling) {
+        unsigned long settledMs = millis() - state.settleStartTime;
+        if (settledMs >= (unsigned long)config.bulbSettleSec * 1000UL) {
+            state.isSettling = false;
+            state.lastShotTime = millis();   // NOW the Interval rest starts counting
+        }
+        return;
+    }
+
     unsigned long now = millis();
 
-    // Rest time before the next shot: Interval, plus Settle Delay when
-    // Bulb is on (extra margin for a BLE link to reconnect/settle -- see
-    // TimelapseConfig::bulbSettleSec).
-    unsigned long waitMs = (unsigned long)config.intervalMs;
-    if (config.bulbEnabled) waitMs += (unsigned long)config.bulbSettleSec * 1000UL;
-
     // Interval check
-    if (now - state.lastShotTime >= waitMs) {
+    if (now - state.lastShotTime >= (unsigned long)config.intervalMs) {
 
         // Sequence complete?
         if (config.totalShots != 0 && state.shotCount >= config.totalShots) {
@@ -250,9 +259,16 @@ void Timelapse::endBulbExposure() {
     state.isExposing = false;
     state.shotCount++;
 
-    // Rest period (Interval) starts counting NOW, from shot completion —
-    // see the note in startBulbExposure().
-    state.lastShotTime = millis();
+    // Settle Delay (if configured) pauses HERE, strictly before the
+    // Interval rest starts counting -- see the isSettling check in
+    // update(). With no Settle Delay, behavior is unchanged from before it
+    // existed: Interval starts counting immediately from shot completion.
+    if (config.bulbSettleSec > 0) {
+        state.isSettling = true;
+        state.settleStartTime = millis();
+    } else {
+        state.lastShotTime = millis();
+    }
 }
 
 // Safety net: force-releases a mid-exposure hold so the camera's shutter
@@ -514,12 +530,14 @@ void Timelapse::start() {
     state.isRunning    = true;
     state.isPaused     = false;
     state.isExposing   = false;
+    state.isSettling   = false;
     state.lastShotTime = millis();
     state.shotCount    = 0;
 }
 
 void Timelapse::stop() {
     forceReleaseBulbIfExposing();   // never leave the shutter open on stop
+    state.isSettling = false;       // don't carry a stale pause into the next run
     config.enable   = false;
     state.isRunning = false;
     state.isPaused  = false;
@@ -527,6 +545,7 @@ void Timelapse::stop() {
 
 void Timelapse::pause() {
     forceReleaseBulbIfExposing();   // never leave the shutter open on pause
+    state.isSettling = false;       // don't carry a stale pause into resume()
     // Pause but preserve progress (shotCount, so shooting can resume)
     config.enable   = false;
     state.isRunning = false;
@@ -591,6 +610,7 @@ int Timelapse::getSelectedValue() {
 
 const char* Timelapse::getStatusString() {
     if (state.isExposing) return "BULB";
+    if (state.isSettling) return "SETTLE";
     // When Bulb is on, the gap between exposures is a rest period, not a
     // normal shooting cycle -- labeling it "RUNNING" (the accurate label
     // for the real non-bulb case) reads as if plain quick-pulse shooting
@@ -626,9 +646,8 @@ int Timelapse::getRemainingShots() const {
 }
 
 unsigned long Timelapse::getTimeUntilNextShot() const {
-    if (!config.enable || state.isExposing) return 0;
+    if (!config.enable || state.isExposing || state.isSettling) return 0;
     unsigned long waitMs = (unsigned long)config.intervalMs;
-    if (config.bulbEnabled) waitMs += (unsigned long)config.bulbSettleSec * 1000UL;
     unsigned long elapsed = millis() - state.lastShotTime;
     if (elapsed >= waitMs) return 0;
     return waitMs - elapsed;
@@ -638,6 +657,14 @@ unsigned long Timelapse::getBulbTimeRemaining() const {
     if (!state.isExposing) return 0;
     unsigned long elapsed = millis() - state.exposureStartTime;
     unsigned long totalMs = (unsigned long)config.bulbExposureSec * 1000UL;
+    if (elapsed >= totalMs) return 0;
+    return totalMs - elapsed;
+}
+
+unsigned long Timelapse::getSettleTimeRemaining() const {
+    if (!state.isSettling) return 0;
+    unsigned long elapsed = millis() - state.settleStartTime;
+    unsigned long totalMs = (unsigned long)config.bulbSettleSec * 1000UL;
     if (elapsed >= totalMs) return 0;
     return totalMs - elapsed;
 }

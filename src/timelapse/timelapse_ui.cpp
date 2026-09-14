@@ -233,6 +233,7 @@ void renderTimelapseStatusPanel() {
     else if (strcmp(status, "REST") == 0) statusColor = COLOR_GREEN;
     else if (strcmp(status, "PAUSED") == 0) statusColor = COLOR_YELLOW;
     else if (strcmp(status, "BULB") == 0) statusColor = COLOR_ORANGE;
+    else if (strcmp(status, "SETTLE") == 0) statusColor = COLOR_YELLOW;
     else if (strcmp(status, "DONE") == 0) statusColor = COLOR_GREEN;
 
     // Line 1: status word (left) + realtime countdown (right)
@@ -244,6 +245,9 @@ void renderTimelapseStatusPanel() {
     char cdBuf[20];
     if (timelapse.state.isExposing) {
         unsigned long ms = timelapse.getBulbTimeRemaining();
+        snprintf(cdBuf, sizeof(cdBuf), "%lus", (unsigned long)((ms + 999) / 1000));
+    } else if (timelapse.state.isSettling) {
+        unsigned long ms = timelapse.getSettleTimeRemaining();
         snprintf(cdBuf, sizeof(cdBuf), "%lus", (unsigned long)((ms + 999) / 1000));
     } else if (timelapse.state.isRunning) {
         unsigned long ms = timelapse.getTimeUntilNextShot();
@@ -273,9 +277,13 @@ void renderTimelapseStatusPanel() {
         unsigned long remain  = timelapse.getBulbTimeRemaining();
         if (totalMs > 0) frac = 1.0f - ((float)remain / (float)totalMs);
         barColor = COLOR_ORANGE;
+    } else if (timelapse.state.isSettling) {
+        unsigned long totalMs = (unsigned long)timelapse.config.bulbSettleSec * 1000UL;
+        unsigned long remain  = timelapse.getSettleTimeRemaining();
+        if (totalMs > 0) frac = 1.0f - ((float)remain / (float)totalMs);
+        barColor = COLOR_YELLOW;
     } else if (timelapse.state.isRunning) {
         unsigned long totalMs = (unsigned long)timelapse.config.intervalMs;
-        if (timelapse.config.bulbEnabled) totalMs += (unsigned long)timelapse.config.bulbSettleSec * 1000UL;
         unsigned long remain  = timelapse.getTimeUntilNextShot();
         if (totalMs > 0) frac = 1.0f - ((float)remain / (float)totalMs);
         barColor = COLOR_HIGHLIGHT;

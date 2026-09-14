@@ -253,16 +253,25 @@ same as `trigger()` itself on those three brands.
   only when `isConnected()` was false right before the reconnect (not on every press, so
   `trigger()`/`focus()`'s already-optimized single-shot latency is untouched).
 
-**Settle Delay** (`TimelapseConfig::bulbSettleSec`, ADVANCE row 4, 0-120s, default 0): extra rest
-added on top of Interval, only while Bulb is on, purely as user-tunable margin for the BLE
-reconnect/settle behavior above, on top of the fixed 500ms already baked into each driver — a
-short Interval leaves little room for a flaky BLE reconnect, and this gives a knob to widen that
-room without changing the Interval value itself. Added `perShotMs()`/`solveIntervalMs()`/
-`getTimeUntilNextShot()`, so the MAIN screen's video-duration calculator and the status box's
-countdown/progress bar all account for it — a value here that's forgotten in one of those would
-have been a real, if subtle, regression (a systematically wrong duration estimate is arguably worse
-than an absent feature). ADVANCE is 5 rows now, windowed to 4 visible with scroll indicators, same
-`firstVisible` pattern as Setting's MAIN list.
+**Settle Delay** (`TimelapseConfig::bulbSettleSec`, ADVANCE row 4, 0-120s, default 0): user-tunable
+margin for the BLE reconnect/settle behavior above, on top of the fixed 500ms already baked into
+each driver — a short Interval leaves little room for a flaky BLE reconnect, and this gives a knob
+to widen that room without changing the Interval value itself. Deliberately implemented as its
+**own distinct pause phase** (`TimelapseState::isSettling`/`settleStartTime`, checked in `update()`
+right after the `isExposing` check and before the Interval check), not folded arithmetically into
+the same countdown as Interval — `endBulbExposure()` enters this phase directly (skipping the
+usual immediate `lastShotTime = millis()`) when `bulbSettleSec > 0`, and only once it fully elapses
+does the normal Interval rest start counting. Sequence is therefore Expose → **Settle** (pause,
+own "SETTLE" status/countdown/progress-bar color) → Rest (Interval, "REST") → Expose again, rather
+than a single merged wait. An earlier version added it as a plain `waitMs = intervalMs +
+bulbSettleSec*1000` sum — reverted per explicit feedback in favor of this explicit-phase shape
+before it shipped. A separate idea (force-disconnecting the BLE link at the start of the Settle
+phase, guaranteeing a real reconnect next shot) was also proposed and explicitly rejected as too
+risky (repeated disconnect/reconnect cycling, possible re-bonding costs) — not implemented.
+`perShotMs()`/`solveIntervalMs()` still add Settle Delay into their totals so the MAIN screen's
+video-duration calculator stays accurate regardless of how the wait is phased internally. ADVANCE
+is 5 rows now, windowed to 4 visible with scroll indicators, same `firstVisible` pattern as
+Setting's MAIN list.
 
 Also worth noting since it read as a bug during the same testing but isn't one: **total time
 between shots is Exposure + Interval (+ Settle Delay when set), not just Interval** — this is the
