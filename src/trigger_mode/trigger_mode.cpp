@@ -196,10 +196,10 @@ void TriggerMode::fireBluetoothIfEnabled() {
     RemoteManager::triggerPhoto();
 }
 
-void TriggerMode::pressBluetoothShutterIfEnabled() {
-    if (!config.bluetoothEnabled) return;
-    if (RemoteManager::getBrand() == CameraBrand::None) return;
-    RemoteManager::pressShutter();
+bool TriggerMode::pressBluetoothShutterIfEnabled() {
+    if (!config.bluetoothEnabled) return true;    // nothing to do -- not a failure
+    if (RemoteManager::getBrand() == CameraBrand::None) return true;
+    return RemoteManager::pressShutter();
 }
 
 void TriggerMode::releaseBluetoothShutterIfEnabled() {

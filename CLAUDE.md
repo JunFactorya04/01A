@@ -220,14 +220,35 @@ removed — e.g. Sony's `shutterPress()` sends `FOCUS_DOWN`+`SHUTTER_DOWN` and s
 `endBulbExposure()`/`forceReleaseBulbIfExposing()` call `TriggerMode::pressBluetoothShutterIfEnabled()`/
 `releaseBluetoothShutterIfEnabled()` (same `config.bluetoothEnabled` gate as
 `fireBluetoothIfEnabled()`) alongside the G1/G2 hold — both channels can fire together during bulb
-now, matching how the non-bulb path already runs G1/G2 and BLE together. **This is unverified
-against real camera hardware for a multi-second hold** — confirmed only by static protocol review
-(each existing `trigger()` command pair decomposes cleanly, and Sony's freemote/RMT-P1BT protocol
-in particular is documented elsewhere as supporting exactly this hold-for-bulb behavior), not a
-live bulb exposure on any of the four brands. Needs hardware confirmation before being trusted,
-same as every other BLE protocol change in this codebase — and per the existing Canon/Nikon/Fuji
-caveat above, `trigger()` itself hasn't been hardware-verified on those three either, so
-`shutterPress()`/`shutterRelease()` inherit that same unverified status.
+now, matching how the non-bulb path already runs G1/G2 and BLE together. **Hardware-confirmed
+working over BLE with a Sony camera** after fixing two real bugs found during that testing (both
+below); Canon/Nikon/Fuji's `shutterPress()`/`shutterRelease()` are still unverified on hardware,
+same as `trigger()` itself on those three brands.
+
+- **`shutterRelease()` must reconnect, not just check `isConnected()`.** All four drivers
+  originally bailed out of `shutterRelease()` if the BLE link looked disconnected, on the theory
+  that reconnecting "just to release" wasn't worth it. That doesn't hold for a bulb hold: some
+  cameras idle-disconnect their remote-control BLE profile after several seconds with no traffic
+  — which a 10-30s bulb hold sits right in the middle of — and the camera's shutter is still
+  physically open regardless of our BLE link state. Silently giving up left it open until an
+  unrelated later command (the next shot's `shutterPress()`) happened to toggle it shut, which
+  looked like "the exposure closes on the next interval instead of at the configured Exposure
+  time." Fixed by calling `ensureConnected()` (auto-reconnect) instead, matching
+  `shutterPress()`/`trigger()`'s existing pattern.
+- **A failed BLE press must not be treated as a successful shot.** `pressBluetoothShutterIfEnabled()`
+  now returns `bool` instead of `void`; `startBulbExposure()` checks it when BLE is the *only*
+  configured channel (G1/G2 physical writes can't fail this way) and, on failure, releases the
+  trigger lock and returns without setting `state.isExposing`/advancing anything — same
+  retry-next-tick idiom as the `acquireTriggerLock()` check right above it — instead of committing
+  to a "phantom" exposure where `shotCount` advances normally but the camera never actually
+  received a press. This was the cause of an intermittently missed shot when Interval was short:
+  less time between the previous shot's release and the next press for the BLE link to
+  reconnect/settle meant a higher chance the press itself failed.
+
+Also worth noting since it read as a bug during the same testing but isn't one: **total time
+between shots is Exposure + Interval, not just Interval** — this is the existing, intentional
+"Interval is REST time after exposure" design described above (`perShotMs()`), not something this
+BLE work changed.
 
 The status box's realtime countdown ("next Ns" / "Bulb Ns") + fill progress bar finally puts the
 `getTimeUntilNextShot()` getter to use — it existed in the original code but was never rendered

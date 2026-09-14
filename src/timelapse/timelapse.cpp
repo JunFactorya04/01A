@@ -185,14 +185,30 @@ void Timelapse::startBulbExposure() {
 
     bool fireG2 = triggerMode.config.triggerEnabled;
     bool fireG1 = triggerMode.config.remoteEnabled;
-    if (!fireG2 && !fireG1 && !triggerMode.config.bluetoothEnabled) fireG2 = true;
+    bool bleEnabled = triggerMode.config.bluetoothEnabled;
+    if (!fireG2 && !fireG1 && !bleEnabled) fireG2 = true;
+
+    bool blePressOk = triggerMode.pressBluetoothShutterIfEnabled();
+
+    // If BLE is the only configured channel and its press failed (a BLE
+    // reconnect attempt failing is real and more likely the shorter the
+    // Interval is -- less time for the link to settle after the previous
+    // shot's release), don't commit to a "phantom" exposure the camera
+    // never actually started: shotCount would still advance and the
+    // sequence would look normal, but no photo was taken. Bail out and
+    // retry on the next tick instead -- same idiom as the
+    // acquireTriggerLock() check above. G1/G2 physical writes can't fail
+    // this way, so this only applies when BLE is the sole channel.
+    if (!fireG2 && !fireG1 && bleEnabled && !blePressOk) {
+        releaseTriggerLock();
+        return;
+    }
 
     state.bulbFiredG2 = fireG2;
     state.bulbFiredG1 = fireG1;
 
     if (fireG2) digitalWrite(TRIGGER_G2_PIN, HIGH);
     if (fireG1) digitalWrite(TRIGGER_G1_PIN, HIGH);
-    triggerMode.pressBluetoothShutterIfEnabled();
     if (triggerMode.config.beepEnabled && g_speakerEnabled) tone(BUZZ_PIN, 2500, 60);   // "exposure started" cue
 
     state.isExposing        = true;

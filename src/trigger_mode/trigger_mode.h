@@ -76,7 +76,12 @@ public:
     // Bulb/long-exposure hold over BLE, same ON/OFF gate as
     // fireBluetoothIfEnabled(). Used by Timelapse's Bulb Mode instead of a
     // one-shot trigger — press at exposure start, release at exposure end.
-    void pressBluetoothShutterIfEnabled();
+    // pressBluetoothShutterIfEnabled() returns true when Bluetooth is off
+    // (nothing to do -- not a failure) or when the press actually
+    // succeeded, false only on a real failure (e.g. BLE reconnect failed),
+    // so a BLE-only caller can tell a "phantom" exposure attempt apart from
+    // a real one instead of just assuming it worked.
+    bool pressBluetoothShutterIfEnabled();
     void releaseBluetoothShutterIfEnabled();
     
     // ===== UI Interaction =====
