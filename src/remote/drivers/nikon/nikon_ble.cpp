@@ -288,7 +288,11 @@ bool NikonBLE::shutterPress() {
 }
 
 bool NikonBLE::shutterRelease() {
-    if (!isConnected()) return false;
+    // Reconnect if needed (see SonyBLE::shutterRelease() for why) -- the
+    // camera's shutter is still open regardless of our BLE link state.
+    // Note: a reconnect here re-runs the full 4-message handshake, since
+    // that's not a one-time pairing step for this protocol (see connect()).
+    if (!ensureConnected()) return false;
     uint8_t up[2] = {NIKON_MODE_SHUTTER, NIKON_CMD_RELEASE};
     n_shutter->writeValue(up, 2, true);
     return true;

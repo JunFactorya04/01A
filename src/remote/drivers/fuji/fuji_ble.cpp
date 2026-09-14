@@ -221,7 +221,9 @@ bool FujiBLE::shutterPress() {
 }
 
 bool FujiBLE::shutterRelease() {
-    if (!isConnected()) return false;
+    // Reconnect if needed (see SonyBLE::shutterRelease() for why) -- the
+    // camera's shutter is still open regardless of our BLE link state.
+    if (!ensureConnected()) return false;
     fujiShutterCmd(FUJI_PARAM_RELEASE);
     return true;
 }

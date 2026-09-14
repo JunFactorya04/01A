@@ -248,7 +248,9 @@ bool CanonBLE::shutterPress() {
 }
 
 bool CanonBLE::shutterRelease() {
-    if (!isConnected()) return false;
+    // Reconnect if needed (see SonyBLE::shutterRelease() for why) -- the
+    // camera's shutter is still open regardless of our BLE link state.
+    if (!ensureConnected()) return false;
     uint8_t up = CANON_CMD_NEUTRAL;
     c_shutter->writeValue(&up, 1, true);
     return true;

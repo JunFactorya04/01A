@@ -221,7 +221,14 @@ bool SonyBLE::shutterPress() {
 }
 
 bool SonyBLE::shutterRelease() {
-    if (!isConnected()) return false;   // don't reconnect just to release
+    // Must reconnect if needed (not just check isConnected()) -- if the BLE
+    // link dropped during a long bulb hold (some cameras idle-disconnect
+    // their remote-control BLE profile after several seconds of no
+    // traffic), the camera's shutter is still physically open and this is
+    // the only chance to tell it to close. Silently giving up here would
+    // leave it open until the next unrelated command accidentally toggles
+    // it shut (this was a real reported bug).
+    if (!ensureConnected()) return false;
     s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_UP, 2, true);
     delay(SONY_RELEASE_GAP_MS);
     s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_UP, 2, true);
