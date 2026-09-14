@@ -275,6 +275,7 @@ void renderTimelapseStatusPanel() {
         barColor = COLOR_ORANGE;
     } else if (timelapse.state.isRunning) {
         unsigned long totalMs = (unsigned long)timelapse.config.intervalMs;
+        if (timelapse.config.bulbEnabled) totalMs += (unsigned long)timelapse.config.bulbSettleSec * 1000UL;
         unsigned long remain  = timelapse.getTimeUntilNextShot();
         if (totalMs > 0) frac = 1.0f - ((float)remain / (float)totalMs);
         barColor = COLOR_HIGHLIGHT;
@@ -307,6 +308,13 @@ void renderTimelapseControlButton() {
 }
 
 // ============ ADVANCE SCREEN ============
+// 5 rows (Interval / Total Shots / Bulb Mode / Exposure / Settle Delay)
+// don't fit the panel at once -- windowed to 4 visible rows with scroll
+// indicators, same firstVisible pattern Setting's MAIN list and the OTA
+// update WiFi/release lists already use.
+#define ADVANCE_ROW_COUNT   5
+#define ADVANCE_VISIBLE_ROWS 4
+
 void renderTimelapseAdvanceScreen() {
     _ft->_canvas->setFont(&fonts::efontCN_16);
     _ft->_canvas->setTextDatum(top_center);
@@ -321,11 +329,25 @@ void renderTimelapseAdvanceScreen() {
 
     bool bulbOn = timelapse.config.bulbEnabled;
 
+    int sel = timelapse.editMode.advanceIndex;
+    int firstVisible = 0;
+    if (sel >= ADVANCE_VISIBLE_ROWS) firstVisible = sel - ADVANCE_VISIBLE_ROWS + 1;
+    if (firstVisible > ADVANCE_ROW_COUNT - ADVANCE_VISIBLE_ROWS)
+        firstVisible = ADVANCE_ROW_COUNT - ADVANCE_VISIBLE_ROWS;
+    if (firstVisible < 0) firstVisible = 0;
+
+    auto visible = [&](int rowIndex) {
+        return rowIndex >= firstVisible && rowIndex < firstVisible + ADVANCE_VISIBLE_ROWS;
+    };
+    auto rowY = [&](int rowIndex) {
+        return ITEM_Y_START + (rowIndex - firstVisible) * ITEM_HEIGHT;
+    };
+
     // Row 0: Interval
-    {
-        bool isSel  = (timelapse.editMode.advanceIndex == 0);
+    if (visible(0)) {
+        bool isSel  = (sel == 0);
         bool isEdit = (timelapse.editMode.state == TimelapseEditMode::EDITING && isSel);
-        int y = ITEM_Y_START;
+        int y = rowY(0);
         if (isSel) _ft->_canvas->fillRoundRect(10, y - 1, 220, 18, 3, isEdit ? COLOR_HIGHLIGHT : COLOR_BORDER);
         _ft->_canvas->setTextDatum(top_left);
         _ft->_canvas->setTextColor(isSel ? COLOR_BG : COLOR_TEXT);
@@ -340,10 +362,10 @@ void renderTimelapseAdvanceScreen() {
     }
 
     // Row 1: Total Shots
-    {
-        bool isSel  = (timelapse.editMode.advanceIndex == 1);
+    if (visible(1)) {
+        bool isSel  = (sel == 1);
         bool isEdit = (timelapse.editMode.state == TimelapseEditMode::EDITING && isSel);
-        int y = ITEM_Y_START + ITEM_HEIGHT;
+        int y = rowY(1);
         if (isSel) _ft->_canvas->fillRoundRect(10, y - 1, 220, 18, 3, isEdit ? COLOR_HIGHLIGHT : COLOR_BORDER);
         _ft->_canvas->setTextDatum(top_left);
         _ft->_canvas->setTextColor(isSel ? COLOR_BG : COLOR_TEXT);
@@ -361,15 +383,16 @@ void renderTimelapseAdvanceScreen() {
     }
 
     // Row 2: Bulb Mode ON/OFF
-    renderAdvanceToggleRow(2, "Bulb Mode", bulbOn ? "ON" : "OFF", bulbOn ? COLOR_GREEN : COLOR_RED,
-                           ITEM_Y_START + ITEM_HEIGHT * 2);
+    if (visible(2)) {
+        renderAdvanceToggleRow(2, "Bulb Mode", bulbOn ? "ON" : "OFF", bulbOn ? COLOR_GREEN : COLOR_RED, rowY(2));
+    }
 
     // Row 3: Exposure (only meaningful when Bulb is ON — dimmed label
     // otherwise, still editable so it can be set up in advance)
-    {
-        bool isSel  = (timelapse.editMode.advanceIndex == 3);
+    if (visible(3)) {
+        bool isSel  = (sel == 3);
         bool isEdit = (timelapse.editMode.state == TimelapseEditMode::EDITING && isSel);
-        int y = ITEM_Y_START + ITEM_HEIGHT * 3;
+        int y = rowY(3);
         if (isSel) _ft->_canvas->fillRoundRect(10, y - 1, 220, 18, 3, isEdit ? COLOR_HIGHLIGHT : COLOR_BORDER);
         _ft->_canvas->setTextDatum(top_left);
         _ft->_canvas->setTextColor(isSel ? COLOR_BG : (bulbOn ? COLOR_TEXT : COLOR_BORDER));
@@ -385,17 +408,61 @@ void renderTimelapseAdvanceScreen() {
         _ft->_canvas->setTextDatum(top_left);
     }
 
+    // Row 4: Settle Delay — extra rest added after Interval, only while
+    // Bulb is on (BLE reconnect/settle margin). Dimmed like Exposure when
+    // Bulb is OFF, since it has no effect then.
+    if (visible(4)) {
+        bool isSel  = (sel == 4);
+        bool isEdit = (timelapse.editMode.state == TimelapseEditMode::EDITING && isSel);
+        int y = rowY(4);
+        if (isSel) _ft->_canvas->fillRoundRect(10, y - 1, 220, 18, 3, isEdit ? COLOR_HIGHLIGHT : COLOR_BORDER);
+        _ft->_canvas->setTextDatum(top_left);
+        _ft->_canvas->setTextColor(isSel ? COLOR_BG : (bulbOn ? COLOR_TEXT : COLOR_BORDER));
+        _ft->_canvas->drawString("Settle Delay", ITEM_INDENT, y);
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%ds", timelapse.config.bulbSettleSec);
+        _ft->_canvas->setTextDatum(top_right);
+        if (isEdit && timelapseBlinkState) _ft->_canvas->setTextColor(COLOR_BG);
+        else _ft->_canvas->setTextColor(isSel ? COLOR_BG : (bulbOn ? COLOR_ORANGE : COLOR_BORDER));
+        _ft->_canvas->drawString(buf, 210, y);
+        _ft->_canvas->setTextColor(isSel ? COLOR_BG : COLOR_GREEN);
+        _ft->_canvas->drawString(">", 226, y);
+        _ft->_canvas->setTextDatum(top_left);
+    }
+
+    // Scroll hints
+    if (firstVisible > 0) {
+        _ft->_canvas->setFont(&fonts::efontCN_10);
+        _ft->_canvas->setTextDatum(top_center);
+        _ft->_canvas->setTextColor(COLOR_BORDER);
+        _ft->_canvas->drawString("^", 220, 23);
+        _ft->_canvas->setTextDatum(top_left);
+    }
+    if (firstVisible + ADVANCE_VISIBLE_ROWS < ADVANCE_ROW_COUNT) {
+        _ft->_canvas->setFont(&fonts::efontCN_10);
+        _ft->_canvas->setTextDatum(top_center);
+        _ft->_canvas->setTextColor(COLOR_BORDER);
+        _ft->_canvas->drawString("v", 220, 100);
+        _ft->_canvas->setTextDatum(top_left);
+    }
+
     // Footer hint
     _ft->_canvas->setFont(&fonts::efontCN_10);
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(COLOR_BORDER);
     if (bulbOn) {
-        // Interval is the REST time AFTER each exposure completes (not
-        // overlapping with it) -- spell that out here since it's easy to
-        // assume Interval still means "time between shot starts".
-        char buf[48];
-        snprintf(buf, sizeof(buf), "%ds expose + %s rest/shot",
-                 timelapse.config.bulbExposureSec, formatInterval(timelapse.config.intervalMs));
+        // Interval + Settle Delay is the REST time AFTER each exposure
+        // completes (not overlapping with it) -- spell that out here since
+        // it's easy to assume Interval alone is "time between shot starts".
+        char buf[64];
+        if (timelapse.config.bulbSettleSec > 0) {
+            snprintf(buf, sizeof(buf), "%ds expose + %s + %ds settle",
+                     timelapse.config.bulbExposureSec, formatInterval(timelapse.config.intervalMs),
+                     timelapse.config.bulbSettleSec);
+        } else {
+            snprintf(buf, sizeof(buf), "%ds expose + %s rest/shot",
+                     timelapse.config.bulbExposureSec, formatInterval(timelapse.config.intervalMs));
+        }
         _ft->_canvas->drawString(buf, 12, 113);
     } else {
         _ft->_canvas->drawString("Bulb OFF: quick trigger pulse", 12, 113);

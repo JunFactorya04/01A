@@ -244,11 +244,32 @@ same as `trigger()` itself on those three brands.
   received a press. This was the cause of an intermittently missed shot when Interval was short:
   less time between the previous shot's release and the next press for the BLE link to
   reconnect/settle meant a higher chance the press itself failed.
+- **A fresh reconnect still needs a moment before a write to it is reliable.** The retry above only
+  catches `ensureConnected()` outright failing — it can't catch "connected, but wrote too soon,"
+  since `writeValue()` on this BLE library returns `void` with no way to report a per-write
+  failure. Real-hardware testing showed exactly that pattern (2nd shot missed, 3rd fine, 4th
+  missed — an intermittent race, not a hard failure). Fixed with a per-brand
+  `*_RECONNECT_SETTLE_MS` (500ms for all four, in each `*_protocol.h`), applied in `shutterPress()`
+  only when `isConnected()` was false right before the reconnect (not on every press, so
+  `trigger()`/`focus()`'s already-optimized single-shot latency is untouched).
+
+**Settle Delay** (`TimelapseConfig::bulbSettleSec`, ADVANCE row 4, 0-120s, default 0): extra rest
+added on top of Interval, only while Bulb is on, purely as user-tunable margin for the BLE
+reconnect/settle behavior above, on top of the fixed 500ms already baked into each driver — a
+short Interval leaves little room for a flaky BLE reconnect, and this gives a knob to widen that
+room without changing the Interval value itself. Added `perShotMs()`/`solveIntervalMs()`/
+`getTimeUntilNextShot()`, so the MAIN screen's video-duration calculator and the status box's
+countdown/progress bar all account for it — a value here that's forgotten in one of those would
+have been a real, if subtle, regression (a systematically wrong duration estimate is arguably worse
+than an absent feature). ADVANCE is 5 rows now, windowed to 4 visible with scroll indicators, same
+`firstVisible` pattern as Setting's MAIN list.
 
 Also worth noting since it read as a bug during the same testing but isn't one: **total time
-between shots is Exposure + Interval, not just Interval** — this is the existing, intentional
-"Interval is REST time after exposure" design described above (`perShotMs()`), not something this
-BLE work changed.
+between shots is Exposure + Interval (+ Settle Delay when set), not just Interval** — this is the
+existing, intentional "Interval is REST time after exposure" design described above
+(`perShotMs()`), not something this BLE work changed. With Interval shorter than Exposure (e.g.
+Interval=6s, Exposure=10s), the real per-shot cycle is necessarily at least the Exposure length
+regardless of how Interval is defined — there's no way to rest *during* an open shutter.
 
 The status box's realtime countdown ("next Ns" / "Bulb Ns") + fill progress bar finally puts the
 `getTimeUntilNextShot()` getter to use — it existed in the original code but was never rendered

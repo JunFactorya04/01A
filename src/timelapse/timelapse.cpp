@@ -53,6 +53,7 @@ void Timelapse::loadConfig() {
     config.enable          = prefs.getBool("enable", false);
     config.bulbEnabled     = prefs.getBool("bulbEn", false);
     config.bulbExposureSec = prefs.getInt("bulbSec", 15);
+    config.bulbSettleSec   = prefs.getInt("bulbSettle", 0);
     config.videoFpsIndex   = (uint8_t)prefs.getInt("vidFps", 2);
 
     prefs.end();
@@ -69,6 +70,7 @@ void Timelapse::saveConfig() {
     prefs.putBool("enable", config.enable);
     prefs.putBool("bulbEn", config.bulbEnabled);
     prefs.putInt("bulbSec", config.bulbExposureSec);
+    prefs.putInt("bulbSettle", config.bulbSettleSec);
     prefs.putInt("vidFps", config.videoFpsIndex);
 
     prefs.end();
@@ -78,6 +80,10 @@ void Timelapse::validateConfig() {
     // Clamp Bulb Exposure
     if (config.bulbExposureSec < 1) config.bulbExposureSec = 1;
     if (config.bulbExposureSec > 900) config.bulbExposureSec = 900;
+
+    // Clamp Settle Delay
+    if (config.bulbSettleSec < 0) config.bulbSettleSec = 0;
+    if (config.bulbSettleSec > 120) config.bulbSettleSec = 120;
 
     // Clamp Interval (100ms floor, 1 hour ceiling). When Bulb is on, Interval
     // is the REST period AFTER each exposure completes (see
@@ -117,8 +123,14 @@ void Timelapse::update() {
 
     unsigned long now = millis();
 
+    // Rest time before the next shot: Interval, plus Settle Delay when
+    // Bulb is on (extra margin for a BLE link to reconnect/settle -- see
+    // TimelapseConfig::bulbSettleSec).
+    unsigned long waitMs = (unsigned long)config.intervalMs;
+    if (config.bulbEnabled) waitMs += (unsigned long)config.bulbSettleSec * 1000UL;
+
     // Interval check
-    if (now - state.lastShotTime >= (unsigned long)config.intervalMs) {
+    if (now - state.lastShotTime >= waitMs) {
 
         // Sequence complete?
         if (config.totalShots != 0 && state.shotCount >= config.totalShots) {
@@ -265,7 +277,7 @@ void Timelapse::forceReleaseBulbIfExposing() {
 // are a ~6ms pulse, negligible next to Interval, so they're not added here.
 long Timelapse::perShotMs() const {
     long ms = config.intervalMs;
-    if (config.bulbEnabled) ms += (long)config.bulbExposureSec * 1000L;
+    if (config.bulbEnabled) ms += (long)config.bulbExposureSec * 1000L + (long)config.bulbSettleSec * 1000L;
     return ms;
 }
 
@@ -300,7 +312,9 @@ float Timelapse::currentVideoLengthSecOrBootstrap() const {
 int Timelapse::solveIntervalMs(long durationSec, int shots) const {
     if (shots < 1) shots = 1;
     long long perShotMsNeeded = ((long long)durationSec * 1000LL) / (long long)shots;
-    long long bulbMs = config.bulbEnabled ? (long long)config.bulbExposureSec * 1000LL : 0LL;
+    long long bulbMs = config.bulbEnabled
+                           ? (long long)(config.bulbExposureSec + config.bulbSettleSec) * 1000LL
+                           : 0LL;
     long long ms = perShotMsNeeded - bulbMs;
     if (ms < 100) ms = 100;
     if (ms > 3600000LL) ms = 3600000LL;
@@ -311,9 +325,9 @@ int Timelapse::solveIntervalMs(long durationSec, int shots) const {
 void Timelapse::handleEncoderRotate(int delta) {
     if (editMode.state == TimelapseEditMode::SELECTING) {
         if (editMode.screen == TimelapseEditMode::ADVANCE) {
-            // ADVANCE: 0=Interval 1=Total Shots 2=Bulb Mode 3=Exposure
+            // ADVANCE: 0=Interval 1=Total Shots 2=Bulb Mode 3=Exposure 4=Settle Delay
             int newIndex = editMode.advanceIndex + (delta > 0 ? 1 : -1);
-            if (newIndex >= 0 && newIndex <= 3) editMode.advanceIndex = newIndex;
+            if (newIndex >= 0 && newIndex <= 4) editMode.advanceIndex = newIndex;
             return;
         }
         // MAIN: 0=Shoot Duration 1=Video Length 2=Video FPS 3=Advance 4=Control
@@ -349,6 +363,9 @@ void Timelapse::handleEncoderRotate(int delta) {
                     break;
                 case 3:  // Bulb Exposure (seconds)
                     config.bulbExposureSec += delta;
+                    break;
+                case 4:  // Settle Delay (seconds)
+                    config.bulbSettleSec += delta;
                     break;
                 // case 2 (Bulb Mode) is an instant toggle on press, not
                 // encoder-adjustable -- see handleButtonPress().
@@ -439,6 +456,7 @@ void Timelapse::handleButtonPress() {
                 case 0:   // Interval
                 case 1:   // Total Shots
                 case 3:   // Bulb Exposure
+                case 4:   // Settle Delay
                     editMode.state = TimelapseEditMode::EDITING;
                     editMode.enterTime = millis();
                     break;
@@ -540,6 +558,7 @@ const char* Timelapse::getSelectedItemName() {
             case 1: return "Total Shots";
             case 2: return "Bulb Mode";
             case 3: return "Exposure";
+            case 4: return "Settle Delay";
             default: return "Unknown";
         }
     }
@@ -558,6 +577,7 @@ int Timelapse::getSelectedValue() {
             case 0: return config.intervalMs;
             case 1: return config.totalShots;
             case 3: return config.bulbExposureSec;
+            case 4: return config.bulbSettleSec;
             default: return 0;
         }
     }
@@ -607,9 +627,11 @@ int Timelapse::getRemainingShots() const {
 
 unsigned long Timelapse::getTimeUntilNextShot() const {
     if (!config.enable || state.isExposing) return 0;
+    unsigned long waitMs = (unsigned long)config.intervalMs;
+    if (config.bulbEnabled) waitMs += (unsigned long)config.bulbSettleSec * 1000UL;
     unsigned long elapsed = millis() - state.lastShotTime;
-    if (elapsed >= (unsigned long)config.intervalMs) return 0;
-    return (unsigned long)config.intervalMs - elapsed;
+    if (elapsed >= waitMs) return 0;
+    return waitMs - elapsed;
 }
 
 unsigned long Timelapse::getBulbTimeRemaining() const {

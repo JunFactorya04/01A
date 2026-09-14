@@ -22,6 +22,14 @@ struct TimelapseConfig {
     bool bulbEnabled = false;
     int bulbExposureSec = 15;   // 1-900s
 
+    // Extra rest added on top of Interval, only while Bulb is on. Exists
+    // specifically to give a BLE camera link real time to reconnect/settle
+    // between shots (see RemoteManager::pressShutter() -- a write right
+    // after a fresh reconnect can silently fail) without having to inflate
+    // the user's actual desired Interval to get that margin. 0 = no change
+    // from before this existed.
+    int bulbSettleSec = 0;      // 0-120s
+
     // Video calculator (MAIN screen). intervalMs/totalShots above remain
     // the only real, persisted shooting parameters -- Shoot Duration and
     // Video Length shown/edited on the MAIN screen are DERIVED from them
@@ -67,6 +75,8 @@ struct TimelapseEditMode {
 
     uint8_t selectedIndex = 0;  // MAIN: 0=Shoot Duration 1=Video Length 2=Video FPS 3=Advance 4=Control
     uint8_t advanceIndex = 0;   // ADVANCE: 0=Interval 1=Total Shots 2=Bulb Mode 3=Exposure
+                                // 4=Settle Delay (5 rows total, windowed to 4 visible --
+                                // see timelapse_ui.cpp's renderTimelapseAdvanceScreen())
     unsigned long enterTime = 0;
 };
 
