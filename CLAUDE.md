@@ -222,36 +222,42 @@ pressBluetoothShutterIfEnabled()` alongside the G1/G2 hold, same `config.bluetoo
 something different — see below; `shutterRelease()` itself is still implemented on all four
 drivers (part of the `CameraDriver` contract) but nothing in this codebase calls it anymore.
 
-Real Sony hardware testing went through several fixes before landing on the actual answer:
+Real Sony hardware testing went through several rounds before this stabilized — kept here because
+each round fixed something real, even though none of the earlier ones alone was sufficient:
 
-- Root cause chain ruled out along the way: `shutterRelease()` originally bailed out on
-  `!isConnected()` instead of reconnecting (some cameras idle-disconnect their remote-control BLE
-  profile after several idle seconds, which a 10-30s hold sits right in the middle of) — fixed to
-  `ensureConnected()`. A failed BLE press was being counted as a completed shot (`shotCount`
-  advancing with no photo taken) — fixed by making `pressBluetoothShutterIfEnabled()` return `bool`
-  and retrying next tick on failure when BLE is the sole channel. A fresh reconnect needed time
-  before a write to it was reliable (`writeValue()` returns `void`, no way to detect a write that
-  didn't land) — fixed with a per-brand `*_RECONNECT_SETTLE_MS` (500ms), applied in
-  `shutterPress()` only on an actual reconnect. `shutterRelease()`'s closing command was sent
-  twice, ~50ms apart, for the same "can't confirm a write landed" reason.
-- **None of that was actually it.** The real behavior, confirmed on hardware: the camera does not
-  end an open bulb exposure on a bare release/"up" command over BLE at all — it only closes on the
-  **next full press it receives** (empirically: the following cycle's `shutterPress()` toggling it
-  shut). This reads as "the exposure closes on the next interval instead of at the configured
-  Exposure time," which is exactly the symptom every fix above was chasing without addressing the
-  actual cause.
-- **Fix**: `endBulbExposure()`/`forceReleaseBulbIfExposing()` now call `TriggerMode::
-  fireBluetoothIfEnabled()` — the same one-shot press-then-release `trigger()` sequence a normal
-  non-bulb shot already uses — instead of a release-only command. The fresh "press" inside that
-  sequence is what actually closes the bulb (toggle-style); the "release" that follows it a moment
-  later is a harmless no-op once the shutter's already closed. `TriggerMode::
-  releaseBluetoothShutterIfEnabled()` (the old release-only wrapper) was removed as unused once
-  nothing called it anymore — `shutterRelease()` stays on the `CameraDriver` interface itself since
-  it's still a coherent capability, just not the one this codebase currently exercises.
+1. `shutterRelease()` originally bailed out on `!isConnected()` instead of reconnecting (some
+   cameras idle-disconnect their remote-control BLE profile after several idle seconds, which a
+   10-30s hold sits right in the middle of) — fixed to `ensureConnected()`.
+2. A failed BLE press was being counted as a completed shot (`shotCount` advancing with no photo
+   taken) — fixed by making `pressBluetoothShutterIfEnabled()` return `bool` and retrying next
+   tick on failure when BLE is the sole channel.
+3. A fresh reconnect needed time before a write to it was reliable (`writeValue()` returns `void`,
+   no way to detect a write that didn't land) — fixed with a per-brand `*_RECONNECT_SETTLE_MS`
+   (500ms), applied in `shutterPress()` only on an actual reconnect.
+4. `shutterRelease()`'s closing command was sent twice, ~50ms apart, for the same "can't confirm a
+   write landed" reason.
+5. **The actual behavior**, confirmed on hardware after 1-4 still didn't fully fix it: the camera
+   does not end an open bulb exposure on a bare release/"up" command over BLE at all — it only
+   closes on the **next full press it receives** (empirically: the following cycle's
+   `shutterPress()` toggling it shut). `endBulbExposure()`/`forceReleaseBulbIfExposing()` now call
+   `TriggerMode::fireBluetoothIfEnabled()` — the same one-shot press-then-release `trigger()`
+   sequence a normal non-bulb shot already uses — instead of a release-only command, so that
+   toggle-close happens immediately instead of waiting on the next cycle to trigger it by accident.
+   `TriggerMode::releaseBluetoothShutterIfEnabled()` (the old release-only wrapper) was removed as
+   unused; `shutterRelease()` stays on the `CameraDriver` interface itself since it's still a
+   coherent capability, just not the one this codebase currently exercises.
+6. Fix 5 alone still weren't enough: closing now goes through `trigger()`, but the
+   `*_RECONNECT_SETTLE_MS` from fix 3 had only ever been added to `shutterPress()`, not `trigger()`
+   — so the exact same "wrote right after reconnect, didn't land" failure from fix 3 could still
+   hit the close path specifically (bulb holds are long enough that the link is realistically stale
+   by the time `endBulbExposure()` calls `trigger()`). `trigger()` on all four drivers now does the
+   same `wasConnected` check + settle delay `shutterPress()` already had, costing nothing in the
+   common already-connected case (plain continuous non-bulb shooting) that `trigger()`'s latency
+   was originally tuned for.
 
-**Hardware-confirmed working over BLE with a Sony camera** with this final shape. Canon/Nikon/Fuji
-are still unverified on hardware (same as `trigger()` itself on those three brands) — and since
-their bulb-close path was only ever tested/fixed against Sony's specific toggle-on-press behavior,
+Still being verified on real Sony hardware as of the latest round (6). Canon/Nikon/Fuji are
+unverified on hardware entirely (same as `trigger()` itself on those three brands) — and since the
+bulb-close behavior in step 5 was discovered against Sony's specific toggle-on-press behavior,
 there's no guarantee the other three brands behave the same way; that needs its own hardware check
 before trusting it.
 

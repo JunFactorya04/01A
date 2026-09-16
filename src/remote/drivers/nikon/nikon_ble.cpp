@@ -262,7 +262,9 @@ bool NikonBLE::ensureConnected() {
 }
 
 bool NikonBLE::trigger() {
+    bool wasConnected = isConnected();
     if (!ensureConnected()) return false;
+    if (!wasConnected) delay(NIKON_RECONNECT_SETTLE_MS);
     uint8_t down[2] = {NIKON_MODE_SHUTTER, NIKON_CMD_PRESS};
     uint8_t up[2]   = {NIKON_MODE_SHUTTER, NIKON_CMD_RELEASE};
     n_shutter->writeValue(down, 2, true);

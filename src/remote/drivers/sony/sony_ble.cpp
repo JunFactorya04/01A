@@ -186,7 +186,13 @@ bool SonyBLE::ensureConnected() {
 }
 
 bool SonyBLE::trigger() {
+    bool wasConnected = isConnected();
     if (!ensureConnected()) return false;
+    // Only costs anything on an actual reconnect (e.g. Timelapse's Bulb
+    // Mode calling this to close a long exposure, after the link sat idle
+    // the whole time) -- zero added latency for the common already-connected
+    // case this was tuned for. See SONY_RECONNECT_SETTLE_MS's comment.
+    if (!wasConnected) delay(SONY_RECONNECT_SETTLE_MS);
 
     // half-press -> full press -> release (freemote sequence)
     s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_DOWN, 2, true);

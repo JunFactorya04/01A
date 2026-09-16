@@ -196,7 +196,9 @@ static void fujiShutterCmd(uint8_t p0, uint8_t p1) {
 }
 
 bool FujiBLE::trigger() {
+    bool wasConnected = isConnected();
     if (!ensureConnected()) return false;
+    if (!wasConnected) delay(FUJI_RECONNECT_SETTLE_MS);
     fujiShutterCmd(FUJI_PARAM_PRESS);
     delay(FUJI_SHUTTER_HOLD_MS);
     fujiShutterCmd(FUJI_PARAM_RELEASE);

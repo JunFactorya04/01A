@@ -218,7 +218,9 @@ bool CanonBLE::ensureConnected() {
 }
 
 bool CanonBLE::trigger() {
+    bool wasConnected = isConnected();
     if (!ensureConnected()) return false;
+    if (!wasConnected) delay(CANON_RECONNECT_SETTLE_MS);
     uint8_t down = CANON_CMD_SHUTTER_DOWN;
     uint8_t up   = CANON_CMD_NEUTRAL;
     c_shutter->writeValue(&down, 1, true);
