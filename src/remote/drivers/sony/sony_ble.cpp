@@ -33,10 +33,14 @@ static volatile bool s_found = false;
 namespace {
 
 class SonyClientCB : public BLEClientCallbacks {
-    void onConnect(BLEClient*) override { s_connected = true; }
+    void onConnect(BLEClient*) override {
+        s_connected = true;
+        Serial.printf("[SonyBLE] onConnect @%lu\n", millis());
+    }
     void onDisconnect(BLEClient*) override {
         s_connected = false;
         s_cmdChar = nullptr;
+        Serial.printf("[SonyBLE] onDisconnect @%lu\n", millis());
     }
 };
 
@@ -186,13 +190,21 @@ bool SonyBLE::ensureConnected() {
 }
 
 bool SonyBLE::trigger() {
+    unsigned long t0 = millis();
     bool wasConnected = isConnected();
-    if (!ensureConnected()) return false;
+    Serial.printf("[SonyBLE] trigger() @%lu wasConnected=%d\n", t0, wasConnected);
+    if (!ensureConnected()) {
+        Serial.printf("[SonyBLE] trigger() ensureConnected FAILED @%lu\n", millis());
+        return false;
+    }
     // Only costs anything on an actual reconnect (e.g. Timelapse's Bulb
     // Mode calling this to close a long exposure, after the link sat idle
     // the whole time) -- zero added latency for the common already-connected
     // case this was tuned for. See SONY_RECONNECT_SETTLE_MS's comment.
-    if (!wasConnected) delay(SONY_RECONNECT_SETTLE_MS);
+    if (!wasConnected) {
+        Serial.printf("[SonyBLE] trigger() reconnected, settling %dms\n", SONY_RECONNECT_SETTLE_MS);
+        delay(SONY_RECONNECT_SETTLE_MS);
+    }
 
     // half-press -> full press -> release (freemote sequence)
     s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_DOWN, 2, true);
@@ -202,6 +214,7 @@ bool SonyBLE::trigger() {
     s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_UP, 2, true);
     delay(SONY_RELEASE_GAP_MS);
     s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_UP, 2, true);
+    Serial.printf("[SonyBLE] trigger() writes done @%lu (took %lums)\n", millis(), millis() - t0);
     return true;
 }
 
@@ -219,12 +232,21 @@ bool SonyBLE::focus() {
 // as long as SHUTTER_DOWN is the last state sent. shutterRelease() sends
 // the matching SHUTTER_UP/FOCUS_UP pair to close it.
 bool SonyBLE::shutterPress() {
+    unsigned long t0 = millis();
     bool wasConnected = isConnected();
-    if (!ensureConnected()) return false;
-    if (!wasConnected) delay(SONY_RECONNECT_SETTLE_MS);
+    Serial.printf("[SonyBLE] shutterPress() @%lu wasConnected=%d\n", t0, wasConnected);
+    if (!ensureConnected()) {
+        Serial.printf("[SonyBLE] shutterPress() ensureConnected FAILED @%lu\n", millis());
+        return false;
+    }
+    if (!wasConnected) {
+        Serial.printf("[SonyBLE] shutterPress() reconnected, settling %dms\n", SONY_RECONNECT_SETTLE_MS);
+        delay(SONY_RECONNECT_SETTLE_MS);
+    }
     s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_DOWN, 2, true);
     delay(SONY_FOCUS_SETTLE_MS);
     s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_DOWN, 2, true);
+    Serial.printf("[SonyBLE] shutterPress() writes done @%lu (took %lums)\n", millis(), millis() - t0);
     return true;
 }
 

@@ -202,6 +202,7 @@ void Timelapse::triggerCamera() {
 // protocol review (Sony/Canon/Nikon/Fuji's existing trigger() commands
 // decompose cleanly into press/release pairs), not a live bulb exposure.
 void Timelapse::startBulbExposure() {
+    Serial.printf("[Timelapse] startBulbExposure() @%lu shotCount=%d\n", millis(), state.shotCount);
     if (!acquireTriggerLock()) return;   // retry next tick; nothing advances meanwhile
 
     bool fireG2 = triggerMode.config.triggerEnabled;
@@ -249,6 +250,7 @@ void Timelapse::startBulbExposure() {
 }
 
 void Timelapse::endBulbExposure() {
+    Serial.printf("[Timelapse] endBulbExposure() @%lu (held %lums)\n", millis(), millis() - state.exposureStartTime);
     if (state.bulbFiredG2) digitalWrite(TRIGGER_G2_PIN, LOW);
     if (state.bulbFiredG1) digitalWrite(TRIGGER_G1_PIN, LOW);
 
@@ -260,7 +262,9 @@ void Timelapse::endBulbExposure() {
     // following cycle's shutterPress()). Sending that same press+release
     // signal here closes it immediately instead of waiting on the next
     // cycle to do it by accident.
+    Serial.printf("[Timelapse] calling fireBluetoothIfEnabled() @%lu\n", millis());
     triggerMode.fireBluetoothIfEnabled();
+    Serial.printf("[Timelapse] fireBluetoothIfEnabled() returned @%lu\n", millis());
 
     if (triggerMode.config.beepEnabled && g_speakerEnabled) tone(BUZZ_PIN, 1500, 60);   // "exposure done" cue
 
