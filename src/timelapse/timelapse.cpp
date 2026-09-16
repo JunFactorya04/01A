@@ -251,7 +251,17 @@ void Timelapse::startBulbExposure() {
 void Timelapse::endBulbExposure() {
     if (state.bulbFiredG2) digitalWrite(TRIGGER_G2_PIN, LOW);
     if (state.bulbFiredG1) digitalWrite(TRIGGER_G1_PIN, LOW);
-    triggerMode.releaseBluetoothShutterIfEnabled();
+
+    // BLE: send a full quick press+release (the exact same one-shot
+    // trigger() sequence a normal non-bulb shot uses) instead of a
+    // release-only command. Real-hardware testing showed the camera does
+    // not end an open bulb exposure on a bare "release" over BLE -- it only
+    // closed on the NEXT full press it received (empirically, the
+    // following cycle's shutterPress()). Sending that same press+release
+    // signal here closes it immediately instead of waiting on the next
+    // cycle to do it by accident.
+    triggerMode.fireBluetoothIfEnabled();
+
     if (triggerMode.config.beepEnabled && g_speakerEnabled) tone(BUZZ_PIN, 1500, 60);   // "exposure done" cue
 
     releaseTriggerLock();
@@ -279,7 +289,7 @@ void Timelapse::forceReleaseBulbIfExposing() {
 
     if (state.bulbFiredG2) digitalWrite(TRIGGER_G2_PIN, LOW);
     if (state.bulbFiredG1) digitalWrite(TRIGGER_G1_PIN, LOW);
-    triggerMode.releaseBluetoothShutterIfEnabled();   // never leave the BLE shutter held either
+    triggerMode.fireBluetoothIfEnabled();   // full press+release closes it -- see endBulbExposure()
     releaseTriggerLock();
     state.isExposing = false;
     // Deliberately NOT counted as a completed shot (no shotCount++) — it

@@ -212,57 +212,48 @@ never left open indefinitely just because the sequence was interrupted.
 **BLE bulb hold** (added after a user report that testing Bulb Mode over BLE did nothing at all —
 by design at the time, since `CameraDriver` only exposed one-shot `trigger()` and bulb deliberately
 skipped it rather than fire an uncontrolled second shot on top of the held G1/G2 exposure).
-`CameraDriver` now also has `shutterPress()`/`shutterRelease()`, implemented in all four drivers
-(`sony_ble.cpp`, `canon_ble.cpp`, `nikon_ble.cpp`, `fuji_ble.cpp`) by decomposing each driver's own
-existing `trigger()` press-then-delay-then-release sequence into its two halves with the delay
-removed — e.g. Sony's `shutterPress()` sends `FOCUS_DOWN`+`SHUTTER_DOWN` and stops (no
-`SHUTTER_UP`), `shutterRelease()` sends `SHUTTER_UP`+`FOCUS_UP`. `startBulbExposure()`/
-`endBulbExposure()`/`forceReleaseBulbIfExposing()` call `TriggerMode::pressBluetoothShutterIfEnabled()`/
-`releaseBluetoothShutterIfEnabled()` (same `config.bluetoothEnabled` gate as
-`fireBluetoothIfEnabled()`) alongside the G1/G2 hold — both channels can fire together during bulb
-now, matching how the non-bulb path already runs G1/G2 and BLE together. **Hardware-confirmed
-working over BLE with a Sony camera** after fixing two real bugs found during that testing (both
-below); Canon/Nikon/Fuji's `shutterPress()`/`shutterRelease()` are still unverified on hardware,
-same as `trigger()` itself on those three brands.
+`CameraDriver` gained `shutterPress()`/`shutterRelease()`, implemented in all four drivers
+(`sony_ble.cpp`, `canon_ble.cpp`, `nikon_ble.cpp`, `fuji_ble.cpp`) by splitting each driver's own
+existing `trigger()` press-then-delay-then-release sequence into its two halves — e.g. Sony's
+`shutterPress()` sends `FOCUS_DOWN`+`SHUTTER_DOWN` and stops (no `SHUTTER_UP`). **Opening** the
+exposure uses `shutterPress()`: `startBulbExposure()` calls `TriggerMode::
+pressBluetoothShutterIfEnabled()` alongside the G1/G2 hold, same `config.bluetoothEnabled` gate as
+`fireBluetoothIfEnabled()`. **Closing** it, after real-hardware testing (Sony), turned out to need
+something different — see below; `shutterRelease()` itself is still implemented on all four
+drivers (part of the `CameraDriver` contract) but nothing in this codebase calls it anymore.
 
-- **`shutterRelease()` must reconnect, not just check `isConnected()`.** All four drivers
-  originally bailed out of `shutterRelease()` if the BLE link looked disconnected, on the theory
-  that reconnecting "just to release" wasn't worth it. That doesn't hold for a bulb hold: some
-  cameras idle-disconnect their remote-control BLE profile after several seconds with no traffic
-  — which a 10-30s bulb hold sits right in the middle of — and the camera's shutter is still
-  physically open regardless of our BLE link state. Silently giving up left it open until an
-  unrelated later command (the next shot's `shutterPress()`) happened to toggle it shut, which
-  looked like "the exposure closes on the next interval instead of at the configured Exposure
-  time." Fixed by calling `ensureConnected()` (auto-reconnect) instead, matching
-  `shutterPress()`/`trigger()`'s existing pattern.
-- **A failed BLE press must not be treated as a successful shot.** `pressBluetoothShutterIfEnabled()`
-  now returns `bool` instead of `void`; `startBulbExposure()` checks it when BLE is the *only*
-  configured channel (G1/G2 physical writes can't fail this way) and, on failure, releases the
-  trigger lock and returns without setting `state.isExposing`/advancing anything — same
-  retry-next-tick idiom as the `acquireTriggerLock()` check right above it — instead of committing
-  to a "phantom" exposure where `shotCount` advances normally but the camera never actually
-  received a press. This was the cause of an intermittently missed shot when Interval was short:
-  less time between the previous shot's release and the next press for the BLE link to
-  reconnect/settle meant a higher chance the press itself failed.
-- **A fresh reconnect still needs a moment before a write to it is reliable.** The retry above only
-  catches `ensureConnected()` outright failing — it can't catch "connected, but wrote too soon,"
-  since `writeValue()` on this BLE library returns `void` with no way to report a per-write
-  failure. Real-hardware testing showed exactly that pattern (2nd shot missed, 3rd fine, 4th
-  missed — an intermittent race, not a hard failure). Fixed with a per-brand
-  `*_RECONNECT_SETTLE_MS` (500ms for all four, in each `*_protocol.h`), applied in `shutterPress()`
-  only when `isConnected()` was false right before the reconnect (not on every press, so
-  `trigger()`/`focus()`'s already-optimized single-shot latency is untouched).
-- **`shutterRelease()` sends its closing command twice.** Even with the reconnect fix above, real
-  hardware still intermittently failed to close the shutter exactly at the configured Exposure
-  time — status/countdown advanced normally (so the state machine itself was fine), but the
-  physical shutter stayed open until the next shot's `shutterPress()` happened to toggle it shut.
-  Root cause: the BLE link sits fully idle for the whole exposure (tens of seconds, zero traffic),
-  and the camera can be slow to respond to the very first command afterward — `writeValue()`
-  returns `void`, so there is no way to detect that the single send didn't land. Each driver's
-  `shutterRelease()` now sends its closing command (Sony `SHUTTER_UP`, Canon `CMD_NEUTRAL`, Nikon
-  `{MODE_SHUTTER,CMD_RELEASE}`, Fuji `PARAM_RELEASE`) **twice**, ~50ms apart, before moving on —
-  negligible cost against a multi-second-or-longer bulb hold, meaningfully better odds at least one
-  send is honored.
+Real Sony hardware testing went through several fixes before landing on the actual answer:
+
+- Root cause chain ruled out along the way: `shutterRelease()` originally bailed out on
+  `!isConnected()` instead of reconnecting (some cameras idle-disconnect their remote-control BLE
+  profile after several idle seconds, which a 10-30s hold sits right in the middle of) — fixed to
+  `ensureConnected()`. A failed BLE press was being counted as a completed shot (`shotCount`
+  advancing with no photo taken) — fixed by making `pressBluetoothShutterIfEnabled()` return `bool`
+  and retrying next tick on failure when BLE is the sole channel. A fresh reconnect needed time
+  before a write to it was reliable (`writeValue()` returns `void`, no way to detect a write that
+  didn't land) — fixed with a per-brand `*_RECONNECT_SETTLE_MS` (500ms), applied in
+  `shutterPress()` only on an actual reconnect. `shutterRelease()`'s closing command was sent
+  twice, ~50ms apart, for the same "can't confirm a write landed" reason.
+- **None of that was actually it.** The real behavior, confirmed on hardware: the camera does not
+  end an open bulb exposure on a bare release/"up" command over BLE at all — it only closes on the
+  **next full press it receives** (empirically: the following cycle's `shutterPress()` toggling it
+  shut). This reads as "the exposure closes on the next interval instead of at the configured
+  Exposure time," which is exactly the symptom every fix above was chasing without addressing the
+  actual cause.
+- **Fix**: `endBulbExposure()`/`forceReleaseBulbIfExposing()` now call `TriggerMode::
+  fireBluetoothIfEnabled()` — the same one-shot press-then-release `trigger()` sequence a normal
+  non-bulb shot already uses — instead of a release-only command. The fresh "press" inside that
+  sequence is what actually closes the bulb (toggle-style); the "release" that follows it a moment
+  later is a harmless no-op once the shutter's already closed. `TriggerMode::
+  releaseBluetoothShutterIfEnabled()` (the old release-only wrapper) was removed as unused once
+  nothing called it anymore — `shutterRelease()` stays on the `CameraDriver` interface itself since
+  it's still a coherent capability, just not the one this codebase currently exercises.
+
+**Hardware-confirmed working over BLE with a Sony camera** with this final shape. Canon/Nikon/Fuji
+are still unverified on hardware (same as `trigger()` itself on those three brands) — and since
+their bulb-close path was only ever tested/fixed against Sony's specific toggle-on-press behavior,
+there's no guarantee the other three brands behave the same way; that needs its own hardware check
+before trusting it.
 
 **Settle Delay** (`TimelapseConfig::bulbSettleSec`, ADVANCE row 4, 0-120s, default 0): user-tunable
 margin for the BLE reconnect/settle behavior above, on top of the fixed 500ms already baked into
