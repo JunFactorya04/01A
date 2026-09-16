@@ -28,19 +28,17 @@ static volatile bool            s_connected = false;
 static String  s_foundAddr;
 static uint8_t s_foundType = BLE_ADDR_TYPE_RANDOM;
 static volatile bool s_found = false;
+static volatile bool s_authDone = false;
+static volatile bool s_authOk   = false;
 
 // ---- callbacks ----
 namespace {
 
 class SonyClientCB : public BLEClientCallbacks {
-    void onConnect(BLEClient*) override {
-        s_connected = true;
-        Serial.printf("[SonyBLE] onConnect @%lu\n", millis());
-    }
+    void onConnect(BLEClient*) override { s_connected = true; }
     void onDisconnect(BLEClient*) override {
         s_connected = false;
         s_cmdChar = nullptr;
-        Serial.printf("[SonyBLE] onDisconnect @%lu\n", millis());
     }
 };
 
@@ -49,6 +47,8 @@ class SonySecurityCB : public BLESecurityCallbacks {
     void onPassKeyNotify(uint32_t) override {}
     bool onSecurityRequest() override { return true; }
     void onAuthenticationComplete(esp_ble_auth_cmpl_t cmpl) override {
+        s_authOk = cmpl.success;
+        s_authDone = true;
         Serial.printf("[SonyBLE] pairing %s\n", cmpl.success ? "success" : "failed");
     }
     bool onConfirmPIN(uint32_t) override { return true; }
@@ -103,6 +103,7 @@ bool SonyBLE::connectTo(const String& addr, uint8_t addrType) {
     if (s_client && s_connected) return true;
 
     applySecurity();
+    s_authDone = false;
 
     if (!s_client) {
         s_client = BLEDevice::createClient();
@@ -112,6 +113,32 @@ bool SonyBLE::connectTo(const String& addr, uint8_t addrType) {
     BLEAddress bleAddr(addr.c_str());
     if (!s_client->connect(bleAddr, (esp_ble_addr_type_t)addrType)) {
         Serial.println("[SonyBLE] connect failed");
+        return false;
+    }
+
+    // Wait for the encryption/bonding handshake to actually finish before
+    // touching any characteristic. Discovering services while security is
+    // still pending (camera may even be showing its own on-screen "allow
+    // this remote?" confirmation) can make the underlying bluedroid stack
+    // retry GATT discovery repeatedly -- each retry adds to a fixed-size
+    // characteristic cache (CONFIG_BT_GATTC_MAX_CACHE_CHAR) that never gets
+    // pruned on a failed attempt, so it fills up and every discovery call
+    // permanently fails with "char not added, no resources" for the rest
+    // of the session. This was confirmed on hardware to happen on a
+    // completely fresh (just erase_flash'd, never-bonded-before) device --
+    // not something that built up over many sessions. Mirrors
+    // CanonBLE::connectTo()'s c_authDone wait, which this codebase already
+    // established fixes the same class of bug for Canon's MITM pairing.
+    unsigned long deadline = millis() + 10000UL;
+    while (!s_authDone && millis() < deadline) delay(20);
+    if (!s_authDone) {
+        Serial.println("[SonyBLE] auth timed out");
+        s_client->disconnect();
+        return false;
+    }
+    if (!s_authOk) {
+        Serial.println("[SonyBLE] auth failed");
+        s_client->disconnect();
         return false;
     }
 
@@ -190,21 +217,12 @@ bool SonyBLE::ensureConnected() {
 }
 
 bool SonyBLE::trigger() {
-    unsigned long t0 = millis();
     bool wasConnected = isConnected();
-    Serial.printf("[SonyBLE] trigger() @%lu wasConnected=%d\n", t0, wasConnected);
-    if (!ensureConnected()) {
-        Serial.printf("[SonyBLE] trigger() ensureConnected FAILED @%lu\n", millis());
-        return false;
-    }
-    // Only costs anything on an actual reconnect (e.g. Timelapse's Bulb
-    // Mode calling this to close a long exposure, after the link sat idle
-    // the whole time) -- zero added latency for the common already-connected
-    // case this was tuned for. See SONY_RECONNECT_SETTLE_MS's comment.
-    if (!wasConnected) {
-        Serial.printf("[SonyBLE] trigger() reconnected, settling %dms\n", SONY_RECONNECT_SETTLE_MS);
-        delay(SONY_RECONNECT_SETTLE_MS);
-    }
+    if (!ensureConnected()) return false;
+    // Only costs anything on an actual reconnect -- zero added latency for
+    // the common already-connected case this was tuned for. See
+    // SONY_RECONNECT_SETTLE_MS's comment.
+    if (!wasConnected) delay(SONY_RECONNECT_SETTLE_MS);
 
     // half-press -> full press -> release (freemote sequence)
     s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_DOWN, 2, true);
@@ -214,7 +232,6 @@ bool SonyBLE::trigger() {
     s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_UP, 2, true);
     delay(SONY_RELEASE_GAP_MS);
     s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_UP, 2, true);
-    Serial.printf("[SonyBLE] trigger() writes done @%lu (took %lums)\n", millis(), millis() - t0);
     return true;
 }
 
@@ -232,21 +249,12 @@ bool SonyBLE::focus() {
 // as long as SHUTTER_DOWN is the last state sent. shutterRelease() sends
 // the matching SHUTTER_UP/FOCUS_UP pair to close it.
 bool SonyBLE::shutterPress() {
-    unsigned long t0 = millis();
     bool wasConnected = isConnected();
-    Serial.printf("[SonyBLE] shutterPress() @%lu wasConnected=%d\n", t0, wasConnected);
-    if (!ensureConnected()) {
-        Serial.printf("[SonyBLE] shutterPress() ensureConnected FAILED @%lu\n", millis());
-        return false;
-    }
-    if (!wasConnected) {
-        Serial.printf("[SonyBLE] shutterPress() reconnected, settling %dms\n", SONY_RECONNECT_SETTLE_MS);
-        delay(SONY_RECONNECT_SETTLE_MS);
-    }
+    if (!ensureConnected()) return false;
+    if (!wasConnected) delay(SONY_RECONNECT_SETTLE_MS);
     s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_DOWN, 2, true);
     delay(SONY_FOCUS_SETTLE_MS);
     s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_DOWN, 2, true);
-    Serial.printf("[SonyBLE] shutterPress() writes done @%lu (took %lums)\n", millis(), millis() - t0);
     return true;
 }
 

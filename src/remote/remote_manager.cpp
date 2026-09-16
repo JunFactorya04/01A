@@ -108,9 +108,9 @@ bool pairCamera(unsigned int scanSeconds) {
 
 bool triggerPhoto() {
     CameraDriver* d = driver();
-    if (!d) { Serial.println("[RemoteManager] triggerPhoto: no driver"); return false; }
-    if (!d->hasPairedCamera()) { Serial.println("[RemoteManager] triggerPhoto: not paired"); return false; }
-    if (!bleReady()) { Serial.println("[RemoteManager] triggerPhoto: BLE not ready"); return false; }
+    if (!d) return false;
+    if (!d->hasPairedCamera()) return false;
+    if (!bleReady()) return false;
     return d->trigger();
 }
 

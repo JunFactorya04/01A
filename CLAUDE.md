@@ -209,77 +209,60 @@ screen's calculator accounts for exposure time rather than understating the real
 (`forceReleaseBulbIfExposing()`) so the camera's shutter (and, now, a BLE hold — see below) is
 never left open indefinitely just because the sequence was interrupted.
 
-**BLE bulb hold** (added after a user report that testing Bulb Mode over BLE did nothing at all —
-by design at the time, since `CameraDriver` only exposed one-shot `trigger()` and bulb deliberately
-skipped it rather than fire an uncontrolled second shot on top of the held G1/G2 exposure).
-`CameraDriver` gained `shutterPress()`/`shutterRelease()`, implemented in all four drivers
-(`sony_ble.cpp`, `canon_ble.cpp`, `nikon_ble.cpp`, `fuji_ble.cpp`) by splitting each driver's own
-existing `trigger()` press-then-delay-then-release sequence into its two halves — e.g. Sony's
-`shutterPress()` sends `FOCUS_DOWN`+`SHUTTER_DOWN` and stops (no `SHUTTER_UP`). **Opening** the
-exposure uses `shutterPress()`: `startBulbExposure()` calls `TriggerMode::
-pressBluetoothShutterIfEnabled()` alongside the G1/G2 hold, same `config.bluetoothEnabled` gate as
-`fireBluetoothIfEnabled()`. **Closing** it, after real-hardware testing (Sony), turned out to need
-something different — see below; `shutterRelease()` itself is still implemented on all four
-drivers (part of the `CameraDriver` contract) but nothing in this codebase calls it anymore.
+**BLE bulb hold — tried, root-caused, currently paused.** After a user report that testing Bulb
+Mode over BLE did nothing at all (by original design: `CameraDriver` only exposed one-shot
+`trigger()`, and bulb deliberately skipped it rather than fire an uncontrolled second shot on top
+of the held G1/G2 exposure), `CameraDriver` gained `shutterPress()`/`shutterRelease()` (implemented
+on all four drivers by splitting each one's own `trigger()` press-then-delay-then-release sequence
+into its two halves) and `Timelapse` was wired to call them alongside the G1/G2 hold. Real Sony
+hardware testing went through several real fixes chasing an intermittent "shutter doesn't close at
+the right time" symptom — `shutterRelease()` reconnecting instead of bailing on `!isConnected()`,
+a failed press no longer counting as a completed shot, a per-brand `*_RECONNECT_SETTLE_MS` (500ms)
+after an actual reconnect, closing via a full `trigger()` press+release instead of a release-only
+command (the camera turned out to only close bulb on the *next full press* it receives, not a bare
+"up") — each one fixed something real, but the close still wasn't reliable.
 
-Real Sony hardware testing went through several rounds before this stabilized — kept here because
-each round fixed something real, even though none of the earlier ones alone was sufficient:
+**The actual root cause**, found by capturing a live serial log during a hung pairing attempt:
+`E BT_APPL: char not added, no resources, see CONFIG_BT_GATTC_MAX_CACHE_CHAR`, reproducible on a
+completely fresh `esptool erase_flash` (so not accumulated bond/cache state — a live, per-session
+failure). The classic Arduino `BLEDevice` library caches at most `CONFIG_BT_GATTC_MAX_CACHE_CHAR`
+= 40 characteristics total, compiled into the precompiled `framework = arduino` core (not
+something a normal PlatformIO build here can raise — that would need building the framework itself
+from ESP-IDF with a custom sdkconfig). Worse: `BLEClient::getService()` always triggers a full,
+*unfiltered* service discovery internally (`BLEClient.cpp`: `esp_ble_gattc_search_service(gattc_if,
+conn_id, NULL)` — the filter argument is hardcoded `NULL`, no public API to search just one
+service). A camera whose full GATT profile (all services combined — WiFi transfer, GPS, device
+info, remote control, etc.) exceeds 40 characteristics overflows this cache *inside the library's
+own `connect()` call*, before any of this driver's code — retries, settle delays, auth waits, all
+of it — ever gets a chance to run. This is why nothing at the application layer could have fixed
+it. A parallel fix (mirroring `CanonBLE`'s existing `c_authDone`/`c_authOk` wait — added to
+`SonyBLE::connectTo()` too, since Sony's `getService()` call happened before confirming the
+encryption handshake had even finished) is still worth keeping regardless — it's a real
+correctness improvement independent of the cache-overflow finding — but did not fix this bug
+either, confirming the failure is below the driver's reach entirely.
 
-1. `shutterRelease()` originally bailed out on `!isConnected()` instead of reconnecting (some
-   cameras idle-disconnect their remote-control BLE profile after several idle seconds, which a
-   10-30s hold sits right in the middle of) — fixed to `ensureConnected()`.
-2. A failed BLE press was being counted as a completed shot (`shotCount` advancing with no photo
-   taken) — fixed by making `pressBluetoothShutterIfEnabled()` return `bool` and retrying next
-   tick on failure when BLE is the sole channel.
-3. A fresh reconnect needed time before a write to it was reliable (`writeValue()` returns `void`,
-   no way to detect a write that didn't land) — fixed with a per-brand `*_RECONNECT_SETTLE_MS`
-   (500ms), applied in `shutterPress()` only on an actual reconnect.
-4. `shutterRelease()`'s closing command was sent twice, ~50ms apart, for the same "can't confirm a
-   write landed" reason.
-5. **The actual behavior**, confirmed on hardware after 1-4 still didn't fully fix it: the camera
-   does not end an open bulb exposure on a bare release/"up" command over BLE at all — it only
-   closes on the **next full press it receives** (empirically: the following cycle's
-   `shutterPress()` toggling it shut). `endBulbExposure()`/`forceReleaseBulbIfExposing()` now call
-   `TriggerMode::fireBluetoothIfEnabled()` — the same one-shot press-then-release `trigger()`
-   sequence a normal non-bulb shot already uses — instead of a release-only command, so that
-   toggle-close happens immediately instead of waiting on the next cycle to trigger it by accident.
-   `TriggerMode::releaseBluetoothShutterIfEnabled()` (the old release-only wrapper) was removed as
-   unused; `shutterRelease()` stays on the `CameraDriver` interface itself since it's still a
-   coherent capability, just not the one this codebase currently exercises.
-6. Fix 5 alone still weren't enough: closing now goes through `trigger()`, but the
-   `*_RECONNECT_SETTLE_MS` from fix 3 had only ever been added to `shutterPress()`, not `trigger()`
-   — so the exact same "wrote right after reconnect, didn't land" failure from fix 3 could still
-   hit the close path specifically (bulb holds are long enough that the link is realistically stale
-   by the time `endBulbExposure()` calls `trigger()`). `trigger()` on all four drivers now does the
-   same `wasConnected` check + settle delay `shutterPress()` already had, costing nothing in the
-   common already-connected case (plain continuous non-bulb shooting) that `trigger()`'s latency
-   was originally tuned for.
+The real fix is porting all four drivers to NimBLE (no such fixed cache, and what the furble
+reference project itself uses) — a full rewrite, explicitly out of scope for now. Given that, BLE
+bulb hold is **paused**: `startBulbExposure()`/`endBulbExposure()`/`forceReleaseBulbIfExposing()`
+no longer call into it, restoring the original "BLE skipped entirely during bulb, exclusive to the
+physical G1/G2 hold" behavior (hardware-confirmed working via a direct LED continuity test).
+`CameraDriver::shutterPress()`/`shutterRelease()` and the per-brand `*_RECONNECT_SETTLE_MS`
+constants are left in place on all four drivers — dormant capability, not wired to anything in
+Timelapse right now, ready to be reused if/when a NimBLE port happens. `TriggerMode::
+pressBluetoothShutterIfEnabled()`/`releaseBluetoothShutterIfEnabled()` (the Timelapse-facing
+wrappers) were removed since they'd become fully unused once the wiring was reverted.
 
-Still being verified on real Sony hardware as of the latest round (6). Canon/Nikon/Fuji are
-unverified on hardware entirely (same as `trigger()` itself on those three brands) — and since the
-bulb-close behavior in step 5 was discovered against Sony's specific toggle-on-press behavior,
-there's no guarantee the other three brands behave the same way; that needs its own hardware check
-before trusting it.
-
-**Settle Delay** (`TimelapseConfig::bulbSettleSec`, ADVANCE row 4, 0-120s, default 0): user-tunable
-margin for the BLE reconnect/settle behavior above, on top of the fixed 500ms already baked into
-each driver — a short Interval leaves little room for a flaky BLE reconnect, and this gives a knob
-to widen that room without changing the Interval value itself. Deliberately implemented as its
-**own distinct pause phase** (`TimelapseState::isSettling`/`settleStartTime`, checked in `update()`
-right after the `isExposing` check and before the Interval check), not folded arithmetically into
-the same countdown as Interval — `endBulbExposure()` enters this phase directly (skipping the
-usual immediate `lastShotTime = millis()`) when `bulbSettleSec > 0`, and only once it fully elapses
-does the normal Interval rest start counting. Sequence is therefore Expose → **Settle** (pause,
-own "SETTLE" status/countdown/progress-bar color) → Rest (Interval, "REST") → Expose again, rather
-than a single merged wait. An earlier version added it as a plain `waitMs = intervalMs +
-bulbSettleSec*1000` sum — reverted per explicit feedback in favor of this explicit-phase shape
-before it shipped. A separate idea (force-disconnecting the BLE link at the start of the Settle
-phase, guaranteeing a real reconnect next shot) was also proposed and explicitly rejected as too
-risky (repeated disconnect/reconnect cycling, possible re-bonding costs) — not implemented.
-`perShotMs()`/`solveIntervalMs()` still add Settle Delay into their totals so the MAIN screen's
-video-duration calculator stays accurate regardless of how the wait is phased internally. ADVANCE
-is 5 rows now, windowed to 4 visible with scroll indicators, same `firstVisible` pattern as
-Setting's MAIN list.
+**Settle Delay** (`TimelapseConfig::bulbSettleSec`, ADVANCE row 4, 0-120s, default 0) survives this
+rollback as a standalone feature — extra rest added after Interval, only while Bulb is on,
+implemented as its own distinct pause phase (`TimelapseState::isSettling`/`settleStartTime`,
+checked in `update()` right after the `isExposing` check and before the Interval check — Expose →
+**Settle** (own "SETTLE" status/countdown/progress-bar color) → Rest (Interval, "REST") → Expose
+again, not a single merged wait). Its original motivation (BLE reconnect margin) is moot now that
+BLE bulb hold is paused, but it's still a generically useful knob (e.g. giving the camera more time
+to write a large file before the next shot) so it was left in rather than torn back out.
+`perShotMs()`/`solveIntervalMs()` include it in their totals so the MAIN screen's video-duration
+calculator stays accurate. ADVANCE is 5 rows now, windowed to 4 visible with scroll indicators,
+same `firstVisible` pattern as Setting's MAIN list.
 
 Also worth noting since it read as a bug during the same testing but isn't one: **total time
 between shots is Exposure + Interval (+ Settle Delay when set), not just Interval** — this is the
@@ -405,8 +388,9 @@ This is exposed to the rest of the firmware as `TriggerMode`'s third channel
 timing. `CameraBrand` cycling in `TriggerMode::handleButtonPress()` uses `% 5` (None/Sony/Canon/
 Nikon/Fuji) — update this modulus if another brand is ever added. Each driver also implements
 `shutterPress()`/`shutterRelease()` (press-and-hold primitives, split out of each driver's own
-`trigger()` sequence) — see the "BLE bulb hold" paragraph in the Timelapse section above for why
-and its unverified-on-hardware status.
+`trigger()` sequence) — currently dormant, not called from anywhere; see the "BLE bulb hold"
+paragraph in the Timelapse section above for why (a hard classic-BLEDevice library limit, not
+something fixable at this layer) and what it would take to actually use them again.
 
 **Do not switch Sony's `writeValue()` calls to write-without-response** (`false`) — tried once
 (all 4 commands in the half-press/full-press/release sequence) to cut BLE ack round-trip latency,

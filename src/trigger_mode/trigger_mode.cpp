@@ -193,14 +193,7 @@ void TriggerMode::triggerBoth() {
 void TriggerMode::fireBluetoothIfEnabled() {
     if (!config.bluetoothEnabled) return;
     if (RemoteManager::getBrand() == CameraBrand::None) return;
-    bool ok = RemoteManager::triggerPhoto();
-    Serial.printf("[TriggerMode] fireBluetoothIfEnabled -> triggerPhoto()=%d @%lu\n", ok, millis());
-}
-
-bool TriggerMode::pressBluetoothShutterIfEnabled() {
-    if (!config.bluetoothEnabled) return true;    // nothing to do -- not a failure
-    if (RemoteManager::getBrand() == CameraBrand::None) return true;
-    return RemoteManager::pressShutter();
+    RemoteManager::triggerPhoto();
 }
 
 // ============ UI INTERACTION ============

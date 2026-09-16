@@ -187,44 +187,30 @@ void Timelapse::triggerCamera() {
 // ============ BULB EXPOSURE (non-blocking long hold) ============
 // Starts a HELD trigger pulse for config.bulbExposureSec instead of the
 // usual ~6ms tap. The camera must already be set to BULB mode by the
-// photographer; holding G1/G2 closed (or the BLE shutter-press, see below)
-// is what keeps its shutter open.
+// photographer; holding G1/G2 closed is what keeps its shutter open.
 //
-// BLE fires a real press-and-hold here too (RemoteManager::pressShutter(),
-// released in endBulbExposure()/forceReleaseBulbIfExposing()) -- it used to
-// be skipped entirely during bulb because CameraDriver only exposed a
-// one-shot trigger(), which would have landed as an uncontrolled second
-// shot on top of the held exposure. Now that shutterPress()/shutterRelease()
-// exist as real hold primitives (mirroring each driver's own
-// press-then-delay-then-release trigger() sequence, just without the fixed
-// delay), BLE can hold exactly like G1/G2 does. This is UNVERIFIED against
-// real camera hardware for a multi-second hold -- confirmed only by static
-// protocol review (Sony/Canon/Nikon/Fuji's existing trigger() commands
-// decompose cleanly into press/release pairs), not a live bulb exposure.
+// BLE bulb hold (shutterPress()/shutterRelease() on CameraDriver) was
+// implemented and hardware-tested this cycle, but real testing traced the
+// failure to a hard library limit: the classic Arduino BLEDevice's GATT
+// client caches at most CONFIG_BT_GATTC_MAX_CACHE_CHAR=40 characteristics
+// total (compiled into the precompiled arduino-esp32 core, not something
+// this project's build can raise), and BLEClient::getService() always does
+// an unfiltered full-service discovery internally (esp_ble_gattc_search_
+// service(..., NULL)) -- so connecting to a camera whose full GATT profile
+// exceeds 40 characteristics overflows the cache *inside* the library's own
+// connect() call, before any of this driver's code (retries, settle delays,
+// auth waits) ever gets a chance to run. No application-level fix reaches
+// that. Real fix would be porting to NimBLE (no such cache limit, and what
+// the furble reference project uses) -- a full rewrite of all four BLE
+// drivers, out of scope for now. BLE is therefore back to being skipped
+// entirely during bulb (as it was originally) -- Bulb Mode is exclusive to
+// the physical G1/G2 hold, hardware-confirmed working via direct LED test.
 void Timelapse::startBulbExposure() {
-    Serial.printf("[Timelapse] startBulbExposure() @%lu shotCount=%d\n", millis(), state.shotCount);
     if (!acquireTriggerLock()) return;   // retry next tick; nothing advances meanwhile
 
     bool fireG2 = triggerMode.config.triggerEnabled;
     bool fireG1 = triggerMode.config.remoteEnabled;
-    bool bleEnabled = triggerMode.config.bluetoothEnabled;
-    if (!fireG2 && !fireG1 && !bleEnabled) fireG2 = true;
-
-    bool blePressOk = triggerMode.pressBluetoothShutterIfEnabled();
-
-    // If BLE is the only configured channel and its press failed (a BLE
-    // reconnect attempt failing is real and more likely the shorter the
-    // Interval is -- less time for the link to settle after the previous
-    // shot's release), don't commit to a "phantom" exposure the camera
-    // never actually started: shotCount would still advance and the
-    // sequence would look normal, but no photo was taken. Bail out and
-    // retry on the next tick instead -- same idiom as the
-    // acquireTriggerLock() check above. G1/G2 physical writes can't fail
-    // this way, so this only applies when BLE is the sole channel.
-    if (!fireG2 && !fireG1 && bleEnabled && !blePressOk) {
-        releaseTriggerLock();
-        return;
-    }
+    if (!fireG2 && !fireG1 && !triggerMode.config.bluetoothEnabled) fireG2 = true;
 
     state.bulbFiredG2 = fireG2;
     state.bulbFiredG1 = fireG1;
@@ -250,21 +236,13 @@ void Timelapse::startBulbExposure() {
 }
 
 void Timelapse::endBulbExposure() {
-    Serial.printf("[Timelapse] endBulbExposure() @%lu (held %lums)\n", millis(), millis() - state.exposureStartTime);
     if (state.bulbFiredG2) digitalWrite(TRIGGER_G2_PIN, LOW);
     if (state.bulbFiredG1) digitalWrite(TRIGGER_G1_PIN, LOW);
 
-    // BLE: send a full quick press+release (the exact same one-shot
-    // trigger() sequence a normal non-bulb shot uses) instead of a
-    // release-only command. Real-hardware testing showed the camera does
-    // not end an open bulb exposure on a bare "release" over BLE -- it only
-    // closed on the NEXT full press it received (empirically, the
-    // following cycle's shutterPress()). Sending that same press+release
-    // signal here closes it immediately instead of waiting on the next
-    // cycle to do it by accident.
-    Serial.printf("[Timelapse] calling fireBluetoothIfEnabled() @%lu\n", millis());
-    triggerMode.fireBluetoothIfEnabled();
-    Serial.printf("[Timelapse] fireBluetoothIfEnabled() returned @%lu\n", millis());
+    // BLE deliberately NOT fired here -- see the comment on
+    // startBulbExposure() for why (GATT characteristic cache overflow
+    // inside the classic BLEDevice library itself, not fixable at this
+    // level). Bulb mode is exclusive to the physical G1/G2 hold.
 
     if (triggerMode.config.beepEnabled && g_speakerEnabled) tone(BUZZ_PIN, 1500, 60);   // "exposure done" cue
 
@@ -293,7 +271,6 @@ void Timelapse::forceReleaseBulbIfExposing() {
 
     if (state.bulbFiredG2) digitalWrite(TRIGGER_G2_PIN, LOW);
     if (state.bulbFiredG1) digitalWrite(TRIGGER_G1_PIN, LOW);
-    triggerMode.fireBluetoothIfEnabled();   // full press+release closes it -- see endBulbExposure()
     releaseTriggerLock();
     state.isExposing = false;
     // Deliberately NOT counted as a completed shot (no shotCount++) — it
