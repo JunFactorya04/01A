@@ -57,6 +57,7 @@ struct TimelapseState {
     unsigned long exposureStartTime = 0;
     bool bulbFiredG2 = false;   // which pins were actually driven HIGH at
     bool bulbFiredG1 = false;   // exposure start, so the release matches
+    bool bulbFiredBLE = false;  // BLE shutter press succeeded -> must be released
 
     // Settle Delay in progress: a distinct pause phase entered right after
     // a bulb exposure ends (before the normal Interval rest even starts

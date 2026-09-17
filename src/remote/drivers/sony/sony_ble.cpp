@@ -260,24 +260,38 @@ bool SonyBLE::shutterPress() {
 
 bool SonyBLE::shutterRelease() {
     // Must reconnect if needed (not just check isConnected()) -- if the BLE
-    // link dropped during a long bulb hold (some cameras idle-disconnect
-    // their remote-control BLE profile after several seconds of no
-    // traffic), the camera's shutter is still physically open and this is
-    // the only chance to tell it to close. Silently giving up here would
-    // leave it open until the next unrelated command accidentally toggles
-    // it shut (this was a real reported bug).
+    // link dropped during a long bulb hold, the camera's shutter is still
+    // physically open and this is the only chance to tell it to close.
     if (!ensureConnected()) return false;
 
-    // writeValue() returns void -- a single write with no ack visibility is
-    // not enough after the link has sat idle for the whole exposure (tens
-    // of seconds with zero traffic); the camera can be slow to respond to
-    // the very first command after that. Sending SHUTTER_UP twice (cheap:
-    // ~50ms extra against a multi-second-or-longer bulb hold) noticeably
-    // improved reliability closing the shutter on real hardware, where a
-    // single send intermittently left it open until the next shot's press
-    // happened to toggle it shut.
+    // HARDWARE-CONFIRMED on a Sony A7 IV (ILCE-7M4), with a live serial log
+    // and the resulting EXIF: over BLE this camera IGNORES a bare "shutter
+    // up" as a bulb-closing signal. It closes bulb only on the NEXT FULL
+    // PRESS it receives. Symptom when this was a release-only command: the
+    // write reported OK, the link stayed up the whole exposure, and yet the
+    // frame ran PAST its configured length and only ended when the next
+    // shot's press arrived -- that next press was spending itself closing
+    // the previous exposure instead of starting a new one.
+    //
+    // Note this is the opposite of the WIRED G1/G2 path, where the release
+    // port is a plain switch and holding it is what keeps the shutter open
+    // (a toggle model was tried there and disproven -- see CLAUDE.md). Two
+    // transports, two different rules for the same camera; do not "unify"
+    // them.
+    //
+    // So: first complete the outstanding press cleanly (we sent FOCUS_DOWN +
+    // SHUTTER_DOWN in shutterPress() and never released them), then send a
+    // complete press as the actual closing event.
     s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_UP, 2, true);
-    delay(50);
+    delay(SONY_RELEASE_GAP_MS);
+    s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_UP, 2, true);
+    delay(SONY_RELEASE_GAP_MS);
+
+    // The closing press.
+    s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_DOWN, 2, true);
+    delay(SONY_FOCUS_SETTLE_MS);
+    s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_DOWN, 2, true);
+    delay(SONY_SHUTTER_HOLD_MS);
     s_cmdChar->writeValue((uint8_t*)SONY_SHUTTER_UP, 2, true);
     delay(SONY_RELEASE_GAP_MS);
     s_cmdChar->writeValue((uint8_t*)SONY_FOCUS_UP, 2, true);

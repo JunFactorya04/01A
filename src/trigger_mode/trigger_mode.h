@@ -72,6 +72,11 @@ public:
     // Fire BLE camera shot if Bluetooth channel is ON and a driver selected.
     // Called by AUTO SHOOT / TIMELAPSE after the G1/G2 pulse (same command).
     void fireBluetoothIfEnabled();
+    // Bulb hold over BLE: press opens the shutter, release closes it. Same
+    // ON/OFF gating as fireBluetoothIfEnabled(). Both BLOCK for as long as the
+    // BLE stack takes (a reconnect can be seconds) -- callers must accept that.
+    bool pressBluetoothShutterIfEnabled();
+    void releaseBluetoothShutterIfEnabled();
 
     // ===== UI Interaction =====
     void handleEncoderRotate(int delta);

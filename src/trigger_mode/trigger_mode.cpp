@@ -196,6 +196,36 @@ void TriggerMode::fireBluetoothIfEnabled() {
     RemoteManager::triggerPhoto();
 }
 
+// Bulb hold over BLE (Timelapse's Bulb Mode). Split halves of the same
+// command fireBluetoothIfEnabled() sends as one shot. Returns whether the
+// press actually reached the camera, so the caller can avoid counting a
+// failed press as a real exposure.
+bool TriggerMode::pressBluetoothShutterIfEnabled() {
+    if (!config.bluetoothEnabled) return false;
+    if (RemoteManager::getBrand() == CameraBrand::None) return false;
+    bool ok = RemoteManager::pressShutter();
+    if (!ok) Serial.println("[BLE] bulb open FAILED");
+    return ok;
+}
+
+void TriggerMode::releaseBluetoothShutterIfEnabled() {
+    if (!config.bluetoothEnabled) return;
+    if (RemoteManager::getBrand() == CameraBrand::None) return;
+
+    bool ok = RemoteManager::releaseShutter();
+
+    // Fallback: some bodies only close bulb on the NEXT FULL PRESS they
+    // receive, never on a bare "shutter up". If the release didn't land,
+    // send a complete press+release as that closing press. Documented in
+    // CLAUDE.md as previously tried and partially effective -- kept here as
+    // a last resort rather than the primary path, since it cannot help when
+    // the link itself is down (the real failure mode being investigated).
+    if (!ok) {
+        Serial.println("[BLE] bulb close FAILED -- retrying as a full press");
+        RemoteManager::triggerPhoto();
+    }
+}
+
 // ============ UI INTERACTION ============
 void TriggerMode::handleEncoderRotate(int delta) {
     if (editMode.state != TriggerEditMode::SELECTING) return;

@@ -185,9 +185,21 @@ void Timelapse::triggerCamera() {
 }
 
 // ============ BULB EXPOSURE (non-blocking long hold) ============
-// Starts a HELD trigger pulse for config.bulbExposureSec instead of the
-// usual ~6ms tap. The camera must already be set to BULB mode by the
-// photographer; holding G1/G2 closed is what keeps its shutter open.
+// Holds G1/G2 closed for config.bulbExposureSec instead of the usual ~6ms
+// tap. The wired release port is a plain physical switch: pressing it opens
+// the shutter and releasing it closes the shutter, so the exposure lasts
+// exactly as long as the lines stay closed. The camera must already be set
+// to BULB mode by the photographer.
+//
+// A press-to-open / press-again-to-close (toggle) model was tried on hardware
+// and DISPROVEN -- do not re-introduce it. Sony documents bulb that way for
+// its BLE remote protocol, and this codebase's own BLE work hit exactly that
+// ("the camera only closes bulb on the next full press, not a bare shutter
+// up" -- see CLAUDE.md). But that rule belongs to the BLE command stream, not
+// to the wired contact. Driving two 100ms pulses 10s apart produced TWO
+// separate short frames, not one 10s frame: each pulse was a complete
+// press-and-release, i.e. its own ~100ms bulb exposure. Two frames out is the
+// signature that distinguishes the two models, and it says "hold".
 //
 // BLE bulb hold (shutterPress()/shutterRelease() on CameraDriver) was
 // implemented and hardware-tested this cycle, but real testing traced the
@@ -204,7 +216,7 @@ void Timelapse::triggerCamera() {
 // the furble reference project uses) -- a full rewrite of all four BLE
 // drivers, out of scope for now. BLE is therefore back to being skipped
 // entirely during bulb (as it was originally) -- Bulb Mode is exclusive to
-// the physical G1/G2 hold, hardware-confirmed working via direct LED test.
+// the physical G1/G2 hold.
 void Timelapse::startBulbExposure() {
     if (!acquireTriggerLock()) return;   // retry next tick; nothing advances meanwhile
 
@@ -218,6 +230,11 @@ void Timelapse::startBulbExposure() {
     if (fireG2) digitalWrite(TRIGGER_G2_PIN, HIGH);
     if (fireG1) digitalWrite(TRIGGER_G1_PIN, HIGH);
     if (triggerMode.config.beepEnabled && g_speakerEnabled) tone(BUZZ_PIN, 2500, 60);   // "exposure started" cue
+
+    // 3rd channel: hold the BLE shutter open too, alongside the G1/G2 hold.
+    // Blocking (a reconnect can take seconds) -- done AFTER the GPIO lines are
+    // already HIGH so the physical exposure never waits on the radio.
+    state.bulbFiredBLE = triggerMode.pressBluetoothShutterIfEnabled();
 
     state.isExposing        = true;
     state.exposureStartTime = millis();
@@ -236,13 +253,19 @@ void Timelapse::startBulbExposure() {
 }
 
 void Timelapse::endBulbExposure() {
+    // Releasing the lines is what closes the shutter.
     if (state.bulbFiredG2) digitalWrite(TRIGGER_G2_PIN, LOW);
     if (state.bulbFiredG1) digitalWrite(TRIGGER_G1_PIN, LOW);
+
+    if (state.bulbFiredBLE) {
+        triggerMode.releaseBluetoothShutterIfEnabled();
+        state.bulbFiredBLE = false;
+    }
 
     // BLE deliberately NOT fired here -- see the comment on
     // startBulbExposure() for why (GATT characteristic cache overflow
     // inside the classic BLEDevice library itself, not fixable at this
-    // level). Bulb mode is exclusive to the physical G1/G2 hold.
+    // level). Bulb mode is exclusive to the physical G1/G2 lines.
 
     if (triggerMode.config.beepEnabled && g_speakerEnabled) tone(BUZZ_PIN, 1500, 60);   // "exposure done" cue
 
@@ -271,6 +294,12 @@ void Timelapse::forceReleaseBulbIfExposing() {
 
     if (state.bulbFiredG2) digitalWrite(TRIGGER_G2_PIN, LOW);
     if (state.bulbFiredG1) digitalWrite(TRIGGER_G1_PIN, LOW);
+
+    if (state.bulbFiredBLE) {
+        triggerMode.releaseBluetoothShutterIfEnabled();
+        state.bulbFiredBLE = false;
+    }
+
     releaseTriggerLock();
     state.isExposing = false;
     // Deliberately NOT counted as a completed shot (no shotCount++) — it
