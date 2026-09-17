@@ -241,16 +241,107 @@ encryption handshake had even finished) is still worth keeping regardless — it
 correctness improvement independent of the cache-overflow finding — but did not fix this bug
 either, confirming the failure is below the driver's reach entirely.
 
-The real fix is porting all four drivers to NimBLE (no such fixed cache, and what the furble
-reference project itself uses) — a full rewrite, explicitly out of scope for now. Given that, BLE
-bulb hold is **paused**: `startBulbExposure()`/`endBulbExposure()`/`forceReleaseBulbIfExposing()`
-no longer call into it, restoring the original "BLE skipped entirely during bulb, exclusive to the
-physical G1/G2 hold" behavior (hardware-confirmed working via a direct LED continuity test).
-`CameraDriver::shutterPress()`/`shutterRelease()` and the per-brand `*_RECONNECT_SETTLE_MS`
-constants are left in place on all four drivers — dormant capability, not wired to anything in
-Timelapse right now, ready to be reused if/when a NimBLE port happens. `TriggerMode::
-pressBluetoothShutterIfEnabled()`/`releaseBluetoothShutterIfEnabled()` (the Timelapse-facing
-wrappers) were removed since they'd become fully unused once the wiring was reverted.
+**RESOLVED — BLE bulb hold works on a Sony A7 IV (ILCE-7M4), hardware-confirmed.** The earlier
+"paused, needs a NimBLE port" conclusion was wrong about what was actually blocking it. Two
+separate problems were stacked on top of each other, and only one of them was the cache:
+
+1. **The real protocol bug: a bare `SHUTTER_UP` does not close bulb on this camera.** It closes
+   bulb only on the NEXT FULL PRESS it receives. The old `shutterRelease()` sent a release-only
+   command, which the camera accepted (the write reported OK, the link was up) and then ignored as
+   a closing signal -- so the frame ran PAST its configured length and only ended when the *next
+   shot's* press arrived, that press spending itself closing the previous exposure instead of
+   starting a new one. `SonyBLE::shutterRelease()` now completes the outstanding press
+   (`SHUTTER_UP` + `FOCUS_UP`) and then sends a **complete closing press**
+   (`FOCUS_DOWN`/`SHUTTER_DOWN`/`SHUTTER_UP`/`FOCUS_UP`). Confirmed on hardware: the shutter now
+   closes exactly when the bulb countdown hits 0, and EXIF matches the configured exposure. The
+   close takes ~470-500ms (vs ~240ms for the old release-only path) -- that timing difference is a
+   useful signal in the log that the new path actually ran.
+2. **The GATT cache overflow only bites on RECONNECT.** `E BT_APPL: char not added, no resources`
+   still floods the log on every single connect (the A7 IV's full GATT profile far exceeds the
+   40-characteristic cache), but it is **not fatal**: Sony's remote-control characteristic gets
+   cached before the cache fills, so `connect()` succeeds and commands go through. The failure
+   mode is a *reconnect* mid-sequence, where discovery re-runs against an already-full cache. As
+   long as the link stays up for the whole exposure it is never hit -- and in testing it never
+   dropped once (`[BLE] hold <ms> link=UP` sampled every second across many consecutive 30s
+   exposures, zero `link=DOWN`).
+
+**Opposite rules on the two transports, same camera — do not "unify" them.** Over BLE this camera
+is a TOGGLE (press opens, next full press closes). Over the wired G1/G2 port it is a HELD CONTACT
+(press opens, release closes) and a toggle model was tried there and disproven -- see the wired
+bulb section above. Conflating the two sent this investigation down the wrong path more than once.
+
+**NimBLE is therefore no longer required for this feature**, and is downgraded from "the real fix"
+to a sensible long-term move: it removes the cache limit entirely, allows discovering just one
+service, and uses less flash (the build sits at ~88.5% of the app partition). Revisit it if a
+camera ever turns up whose profile pushes the command characteristic itself out of the cache, or
+if a mid-sequence reconnect starts failing in the field.
+
+**Canon/Nikon/Fuji `shutterRelease()` deliberately still send a release-only command.** This was a
+considered decision, not an oversight -- do not "finish the job" by copying Sony's closing press
+into them. Sony is the odd one out: its freemote `SHUTTER_UP` turns out not to end a bulb exposure,
+which is why it needs a closing press. The other three each expose an explicit press/release pair
+in their own protocol (`CANON_CMD_SHUTTER_DOWN`/`CANON_CMD_NEUTRAL`,
+`NIKON_CMD_PRESS`/`NIKON_CMD_RELEASE`, `FUJI_PARAM_PRESS`/`FUJI_PARAM_RELEASE`), which reads as a
+hold model where the release command genuinely closes. Adding a closing press on top of a release
+that already works would fire an **extra frame on every shot**, or re-open bulb.
+
+Firmware cannot decide this for itself: `writeValue()` returns void, so there is no way to detect
+whether a close actually landed -- which is also why the `!ok` fallback in
+`TriggerMode::releaseBluetoothShutterIfEnabled()` never fires for these brands (their
+`shutterRelease()` returns true whenever the link is up). It needs a real camera.
+
+**When hardware is available**, the test is the same one that caught it on Sony: run a bulb shot
+and check whether the exposure ends at the countdown or runs on until the next shot's press. If it
+runs on, port Sony's `shutterRelease()` shape to that brand -- complete the outstanding press, then
+send a full closing press. None of the three has ever been verified against a real camera.
+
+Wiring: `Timelapse::startBulbExposure()` calls
+`TriggerMode::pressBluetoothShutterIfEnabled()` after driving G1/G2 HIGH (so the physical exposure
+never waits on the radio) and records the result in `TimelapseState::bulbFiredBLE`; only a
+*successful* press is released later, which is what stops a failed press from being counted as a
+real exposure. `endBulbExposure()` and `forceReleaseBulbIfExposing()` both release, so STOP/PAUSE
+mid-exposure can never leave a shutter open.
+
+**Bulb over a wired link is a HELD contact closure — the link must carry contact *state*, not a
+trigger *event*.** `startBulbExposure()` drives G1/G2 HIGH and holds them for the whole exposure;
+the camera's wired release port is a plain physical switch, so press opens the shutter and release
+closes it. Two things were chased here and both are settled, so don't re-derive them:
+
+1. **A press-to-open / press-again-to-close (toggle) model was tried on hardware and disproven —
+   don't re-introduce it.** Sony documents bulb that way for its *BLE* remote protocol, and this
+   codebase's BLE work hit exactly that ("only closes bulb on the next full press, not a bare
+   shutter up", below). That rule belongs to the BLE command stream, not to the wired contact.
+   Driving two 100ms pulses 10s apart produced **two separate short frames**, not one 10s frame —
+   each pulse was a complete press-and-release, i.e. its own ~100ms bulb exposure. Two frames out
+   is the signature that distinguishes the models, and it says "hold".
+2. **A reported "bulb doesn't hold, camera shoots a short frame" turned out to be a PocketWizard
+   in the signal path, not a firmware bug.** PocketWizard (Plus II/III) transmits a trigger
+   *event*: the receiver closes the camera contact for a brief moment and releases, no matter how
+   long the transmitter's input is held. Bulb cannot pass through that link at all — a MultiMAX
+   (which holds the receiver contact to follow its input) or a direct wire is required. Everything
+   on the box side measured correct throughout: GPIO readback held HIGH for the full 30,000ms, and
+   an LED on the trigger output stayed lit the whole time. The LED test only proves the signal
+   reaching *whatever is plugged in* — when that's a radio trigger rather than the camera, a
+   perfect hold still yields a short frame. **When bulb misbehaves, establish what is between the
+   box and the camera body before touching timing/GPIO logic.**
+
+**Serial logging works now — it never did before.** Nothing in this project ever called
+`Serial.begin()`, so every `Serial.print`/`printf` scattered through the drivers and modes (all
+the BLE driver logging included) silently produced nothing; that is why earlier hardware debugging
+had to proceed by guesswork. `src/main.cpp`'s `setup()` now calls `Serial.begin(115200)`, and
+`platformio.ini` sets `-DARDUINO_USB_CDC_ON_BOOT=1` so `Serial` routes to the built-in
+USB-Serial-JTAG port (the same USB socket used for flashing) instead of UART0 on GPIO43/44, which
+this hardware doesn't expose. Note `pio device monitor` needs a real TTY and fails when invoked
+non-interactively — drive `pyserial` directly (open the port with `dtr`/`rts` True) to capture
+logs from a script. Also: a capture script holding the port makes `pio run --target upload` fail
+with "chip stopped responding" — stop the capture before flashing.
+
+**Physical connector labels do not match the code's G1/G2 names.** The box's physically-labelled
+G1 is `TRIGGER_G2_PIN` (GPIO2), driven by the row shown as `Trigger` in TRIGGER MODE; the row
+shown as `Remote` drives `TRIGGER_G1_PIN` (GPIO1). `hardware_config.h`'s
+`Yellow=G2=GPIO2, White=G1=GPIO1` comment describes the connector wiring, not the silkscreen the
+user reads. Both lines are parallel trigger outputs (there is no separate focus line), so this is
+cosmetic — but it has already caused wrong conclusions twice while debugging.
 
 **Settle Delay** (`TimelapseConfig::bulbSettleSec`, ADVANCE row 4, 0-120s, default 0) survives this
 rollback as a standalone feature — extra rest added after Interval, only while Bulb is on,
