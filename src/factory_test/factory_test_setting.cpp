@@ -66,6 +66,10 @@ void FactoryTest::_setting_test() {
 void FactoryTest::_setting_loop() {
     // Power save dim/screen-off after inactivity runs here too now. Skip
     // real input handling the one cycle a wake-tap fires.
+    // Low-battery guard -- warns, and on a flat pack asks this mode to exit
+    // so its own clean-exit path runs before power is cut.
+    _battery_guard_tick();
+
     if (!_display_power_save_tick()) {
         handleSettingInput();
     }

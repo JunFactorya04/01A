@@ -7,6 +7,7 @@
 #include "../common/hardware_config.h"
 #include "../display_mode/display_mode.h"
 #include "../sleep_week/sleep_week_ui.h"   // schedulerPopupActive()
+#include "../common/battery.h"
 
 int FactoryTest::_read_encoder_delta(int& last_pos, bool playBuzz)
 {
@@ -56,6 +57,37 @@ FactoryTest::ButtonEvent FactoryTest::_read_mode_button_event(unsigned long shor
     }
 
     return ButtonEvent::None;
+}
+
+void FactoryTest::_battery_guard_tick()
+{
+    // Both checks are already debounced against load sag inside battery.cpp
+    // (a low reading must hold continuously -- 10s to warn, 60s to shut
+    // down), so nothing extra is needed here. Firing a trigger, the BLE radio
+    // transmitting and TF-Luna polling all dip the rail briefly; none of that
+    // reaches this point.
+    if (batteryCritical())
+    {
+        if (!_battery_shutdown_pending)
+        {
+            _battery_shutdown_pending = true;
+            _tone(400, 600);            // distinct from the low-battery chirp
+
+            // Deliberately NOT calling _power_off() here. Asking the mode to
+            // exit instead routes shutdown through its existing clean-exit
+            // path -- which is what releases a held bulb exposure and saves
+            // config. Cutting power from inside a render loop would leave a
+            // camera's shutter open.
+            _mode_exit_requested = true;
+        }
+        return;
+    }
+
+    if (batteryLow() && !_battery_low_warned)
+    {
+        _battery_low_warned = true;
+        _tone(1200, 150);   // one chirp only -- never interrupt a running shoot
+    }
 }
 
 bool FactoryTest::_display_power_save_tick()

@@ -96,6 +96,12 @@ public:
     // brightness (via DisplayPowerSave::keepAwake()) while a scheduler
     // countdown popup is on screen, since that's meant to alert a person.
     bool _display_power_save_tick();
+
+    // Low-battery guard. Call once per loop iteration in every mode, next to
+    // _display_power_save_tick(). Warns once when low, and on a sustained
+    // critical reading asks the mode to exit so its own clean-exit path runs
+    // (closing an open bulb exposure, saving config) before power is cut.
+    void _battery_guard_tick();
     int _pw_save_enc_last_pos = 0;
 
     /* Encoder */
@@ -174,6 +180,12 @@ public:
     bool _mode_btn_pressed = false;
     unsigned long _mode_btn_press_start = 0;
     bool _mode_exit_requested = false;
+
+    // Set by _battery_guard_tick() when the pack is genuinely flat. The mode
+    // loop exits first (see _battery_guard_tick()'s comment), then the
+    // launcher powers the device down.
+    bool _battery_shutdown_pending = false;
+    bool _battery_low_warned = false;
     bool _manual_power_on = false;             // powered on by button (not scheduled wake)
     bool _scheduler_autostart_pending = false; // WEEK wake: auto-START after delay
     unsigned long _scheduler_autostart_at = 0; // millis() when auto-START fires

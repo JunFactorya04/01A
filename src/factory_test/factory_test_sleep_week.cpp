@@ -191,6 +191,10 @@ void FactoryTest::_sleep_week_loop() {
     //    inactivity) runs here too now. Unrelated to the scheduler's own
     //    device sleep above (backlight only). Skip real input handling the
     //    one cycle a wake-tap fires.
+    // Low-battery guard -- warns, and on a flat pack asks this mode to exit
+    // so its own clean-exit path runs before power is cut.
+    _battery_guard_tick();
+
     if (!_display_power_save_tick()) {
         handleSleepWeekInput();
     }

@@ -21,6 +21,7 @@
 #include "../sleep_week/sleep_week_ui.h"
 #include <smooth_ui_toolkit.h>
 #include <math.h>
+#include "../common/battery_ui.h"
 
 extern FactoryTest* _ft;
 
@@ -109,6 +110,9 @@ void renderAutoShootHeader() {
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(COLOR_TEXT);
     _ft->_canvas->drawString("<", 5, 2);
+
+    // Battery, shared across every mode header (see battery_ui.h)
+    drawBatteryBadge(_ft->_canvas);
 
     // Confirmed TF-Luna sample rate, top-right. tfLuna.getFrameRateHz() is
     // just a cached value from the one readback done in begin() -- reading

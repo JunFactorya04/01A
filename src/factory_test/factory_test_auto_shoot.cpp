@@ -57,6 +57,10 @@ void FactoryTest::_auto_shoot_loop() {
     //    or triggering above. If this cycle's input was just consumed to
     //    wake the screen, skip real input handling so the waking tap can't
     //    also act as a command (e.g. accidentally toggling STOP).
+    // Low-battery guard -- warns, and on a flat pack asks this mode to exit
+    // so its own clean-exit path runs before power is cut.
+    _battery_guard_tick();
+
     if (!_display_power_save_tick()) {
         handleAutoShootInput();
     }

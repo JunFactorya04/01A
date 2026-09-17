@@ -50,6 +50,10 @@ void FactoryTest::_timelapse_loop() {
     // 2. Handle input — power save dim/screen-off after inactivity runs
     //    here too now (display brightness only, never gates the timer
     //    above). Skip real input handling the one cycle a wake-tap fires.
+    // Low-battery guard -- warns, and on a flat pack asks this mode to exit
+    // so its own clean-exit path runs before power is cut.
+    _battery_guard_tick();
+
     if (!_display_power_save_tick()) {
         handleTimelapseInput();
     }

@@ -12,6 +12,7 @@
 #include "../sleep_week/sleep_week_scheduler.h"
 #include "../sleep_week/sleep_week_ui.h"
 #include "../display_mode/display_mode.h"
+#include "../common/battery.h"
 #include "assets/assets.h"
 #include <Arduino.h>
 #include <smooth_ui_toolkit.h>
@@ -308,8 +309,7 @@ void view_create(FactoryTest* ft)
     _batv_panel_transition->moveTo(0, 81);
     _batv_panel_transition->setDelay(300);
     _batv_panel_transition->setDuration(800);
-    float bat_v = (float)analogReadMilliVolts(10) * 2 / 1000;
-    snprintf(_batv, 10, "%.1fV", bat_v);
+    snprintf(_batv, sizeof(_batv), "%u%%", batteryPercent());
 }
 
 void view_update()
@@ -317,14 +317,24 @@ void view_update()
     // Global scheduler tick — keeps SLEEP&WEEK evaluating while at main menu
     sleepWeekScheduler.update();
 
+    // Low-battery guard. Runs here too, so a flat pack is acted on whether the
+    // user is sitting in a mode or back at the menu. A mode that was asked to
+    // exit lands here with _battery_shutdown_pending still set, having already
+    // run its own clean-exit (bulb released, config saved) -- so this is the
+    // right place to actually cut power.
+    _ft->_battery_guard_tick();
+    if (_ft->_battery_shutdown_pending)
+    {
+        _ft->_power_off();
+    }
+
     _launcher_menu->update(millis());
     _batv_panel_transition->update(millis());
 
     // Read bat voltage
     if (millis() - _batv_time_count > 3000)
     {
-        float bat_v = (float)analogReadMilliVolts(10) * 2 / 1000;
-        snprintf(_batv, 10, "%.1fV", bat_v);
+        snprintf(_batv, sizeof(_batv), "%u%%", batteryPercent());
         _batv_time_count = millis();
     }
 }

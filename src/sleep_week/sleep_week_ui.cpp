@@ -14,6 +14,7 @@
 #include "../common/ui_theme.h"   // themed palette
 #include <smooth_ui_toolkit.h>
 #include <time.h>
+#include "../common/battery_ui.h"
 
 extern FactoryTest* _ft;
 
@@ -84,6 +85,9 @@ void renderSleepWeekHeader() {
     _ft->_canvas->setTextDatum(top_left);
     _ft->_canvas->setTextColor(COLOR_TEXT);
     _ft->_canvas->drawString("<", 5, 2);
+
+    // Battery, shared across every mode header (see battery_ui.h)
+    drawBatteryBadge(_ft->_canvas);
 
     // Real-time clock (HH:MM) + date (DD/MM) top-right
     time_t now = time(nullptr);
