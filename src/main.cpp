@@ -20,6 +20,13 @@ void view_update();
 
 void setup()
 {
+    // Nothing in this project ever called Serial.begin(), so every
+    // Serial.print/printf scattered through the drivers and modes silently
+    // produced nothing -- diagnosing anything by serial log was impossible.
+    // Paired with -DARDUINO_USB_CDC_ON_BOOT=1 in platformio.ini, this routes
+    // that output to the built-in USB-Serial-JTAG port (the flashing socket).
+    Serial.begin(115200);
+
     ft.init();
 
     // GEOPIX boot logo: logo fade in -> text fade in -> hold -> fade out,
