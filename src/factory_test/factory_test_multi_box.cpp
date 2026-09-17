@@ -3,7 +3,7 @@
  * @brief MULTI BOX mode integration into FactoryTest
  *
  * Wireless multi-node (native ESP-NOW) coordination: START DETECT / FLASH
- * DETECT / CENTER roles cooperating on a synchronized bulb-exposure shot.
+ * DETECT / MAIN roles cooperating on a synchronized bulb-exposure shot.
  * See src/multi_box/ for the actual logic — this file is just the
  * mode-entry-point + input glue every mode in this codebase has
  * (factory_test_<mode>.cpp), matching e.g. factory_test_trigger_mode.cpp.
@@ -43,6 +43,10 @@ void FactoryTest::_multi_box_loop() {
     if (multiBox.state.session == MultiBoxState::EXPOSING) {
         DisplayPowerSave::keepAwake();
         handleMultiBoxInput();
+    // Low-battery guard -- warns, and on a flat pack asks this mode to exit
+    // so its own clean-exit path runs before power is cut.
+    _battery_guard_tick();
+
     } else if (!_display_power_save_tick()) {
         handleMultiBoxInput();
     }

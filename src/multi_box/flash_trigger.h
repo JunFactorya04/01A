@@ -4,10 +4,9 @@
  * @date 2026-09-06
  *
  * MultiBoxController/MultiBox only ever call fire()/isReady() on this
- * interface — never anything RF- or GPIO-specific — so a real Yongnuo
- * 2.4GHz RF flash trigger implementation can be dropped in later without
- * touching the Multi Box state machine. StubFlashTrigger is the only
- * implementation for now: it logs, no hardware is wired.
+ * interface -- never anything GPIO- or RF-specific -- so a different output
+ * (e.g. a dedicated RF flash transmitter on its own pin) can be dropped in
+ * later without touching the Multi Box state machine.
  */
 
 #pragma once
@@ -20,10 +19,15 @@ public:
     virtual bool fire() = 0;   // one-shot; returns true if the command was issued
 };
 
-class StubFlashTrigger : public FlashTrigger {
+// Fires the flash the same way a camera shot is fired: a brief pulse on the
+// trigger outputs, honouring TriggerMode's per-channel enables. A studio/
+// speedlight sync input is the same kind of dry contact a camera's remote
+// port is, so this needs no separate hardware path -- on a FLASH-role box
+// those outputs are wired to the flash instead of to a camera.
+class GpioFlashTrigger : public FlashTrigger {
 public:
     bool isReady() const override { return true; }
     bool fire() override;
 };
 
-extern StubFlashTrigger flashTrigger;
+extern GpioFlashTrigger flashTrigger;

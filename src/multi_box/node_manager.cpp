@@ -1,6 +1,7 @@
 #include "node_manager.h"
 #include <esp_now.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <Preferences.h>
 #include <cstring>
 
@@ -102,7 +103,7 @@ MBPeer* NodeManager::findByMac(const uint8_t mac[6]) {
 
 MBPeer* NodeManager::findCenter() {
     for (uint8_t i = 0; i < _peerCount; i++)
-        if (_peers[i].role == MBRole::CENTER) return &_peers[i];
+        if (_peers[i].role == MBRole::MAIN) return &_peers[i];
     return nullptr;
 }
 
@@ -148,8 +149,8 @@ uint8_t NodeManager::connectedCount() const {
     return n;
 }
 
-bool NodeManager::acceptSequence(uint8_t nodeId, uint16_t seq) {
-    MBPeer* p = findByNodeId(nodeId);
+bool NodeManager::acceptSequence(const uint8_t mac[6], uint16_t seq) {
+    MBPeer* p = findByMac(mac);
     if (!p) return false;   // unknown sender -- reject
 
     if (!p->haveSeq) {
@@ -199,6 +200,83 @@ void NodeManager::stopScan() {
 
 void NodeManager::tick() {
     if (_scanning && millis() >= _scanDeadline) _scanning = false;
+
+    unsigned long now = millis();
+
+    // Heartbeat. Carries this box's CURRENT role in every packet, which is
+    // what keeps peers' stored roles fresh, and gives the peer table
+    // something to time out against.
+    if (_selfRole != MBRole::NONE && now - _lastHeartbeat >= MB_HEARTBEAT_MS) {
+        _lastHeartbeat = now;
+        MBPacket pkt = {};
+        pkt.command   = (uint8_t)MBCommand::PING;
+        pkt.nodeId    = _selfNodeId;
+        pkt.role      = (uint8_t)_selfRole;
+        pkt.timestamp = now;
+        // Broadcast rather than per-peer: a box we have not paired with yet
+        // still hears it, and it costs one frame instead of N.
+        esp_now_send(BROADCAST_MAC, (uint8_t*)&pkt, sizeof(pkt));
+    }
+
+    // Liveness. Without this `connected` was set true once at pairing and
+    // never cleared, so a box that lost power still read LINKED.
+    for (uint8_t i = 0; i < _peerCount; i++) {
+        if (_peers[i].connected && now - _peers[i].lastSeen > MB_PEER_TIMEOUT_MS) {
+            _peers[i].connected = false;
+        }
+    }
+}
+
+void NodeManager::refreshPeerRole(const uint8_t mac[6], MBRole role) {
+    MBPeer* p = findByMac(mac);
+    if (!p) return;
+
+    unsigned long now = millis();
+    p->lastSeen  = now;
+    p->connected = true;
+
+    if (p->role == role) return;
+    p->role = role;
+
+    // Persist, so a role learned over the air survives a reboot the same way a
+    // manually-paired one does -- but RATE LIMITED. A stale packet carrying the
+    // previous role can still arrive interleaved with fresh ones, and writing
+    // NVS on every flip would wear the flash out. The in-RAM role always
+    // updates; only the write is held back.
+    if (now - p->roleSavedAt < 5000UL) return;
+    p->roleSavedAt = now;
+    saveAll();
+}
+
+bool NodeManager::isSelfMac(const uint8_t mac[6]) {
+    uint8_t self[6];
+    // WiFi STA mac is what esp_now_send() puts in the frame as the source.
+    if (esp_wifi_get_mac(WIFI_IF_STA, self) != ESP_OK) return false;
+    return memcmp(self, mac, 6) == 0;
+}
+
+bool NodeManager::nodeIdClashes(uint8_t nodeId, const uint8_t mac[6]) {
+    if (nodeId == _selfNodeId) {
+        // Somebody else is using OUR id.
+        return !isSelfMac(mac);
+    }
+    for (uint8_t i = 0; i < _peerCount; i++) {
+        if (_peers[i].nodeId == nodeId && memcmp(_peers[i].mac, mac, 6) != 0) return true;
+    }
+    return false;
+}
+
+NodeManager::Conflict NodeManager::conflict() const {
+    // Self-clearing: a clash has to keep being observed to keep being shown,
+    // otherwise fixing it would leave the warning stuck on screen forever.
+    if (_conflict == Conflict::NONE) return Conflict::NONE;
+    if (millis() - _conflictAt > 10000UL) return Conflict::NONE;
+    return _conflict;
+}
+
+void NodeManager::noteConflict(Conflict c) {
+    _conflict   = c;
+    _conflictAt = millis();
 }
 
 NodeManager::Candidate* NodeManager::scanResultAt(uint8_t idx) {

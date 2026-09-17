@@ -3,9 +3,9 @@
  * @brief MULTI BOX ESP-NOW transport + shooting-session state machine
  * @date 2026-09-06
  *
- * Owns esp_now_init()/callbacks and the CENTER-side coordinator logic
- * (sessionId ownership, bulb open/close timing) plus the non-CENTER
- * node-side reaction to CENTER's broadcasts. The ESP-NOW receive callback
+ * Owns esp_now_init()/callbacks and the MAIN-side coordinator logic
+ * (sessionId ownership, bulb open/close timing) plus the non-MAIN
+ * node-side reaction to MAIN's broadcasts. The ESP-NOW receive callback
  * (which runs off the WiFi driver's own task) only ever validates size and
  * pushes to a queue — everything else (camera GPIO, UI, NVS) happens in
  * update(), called from the main loop.
@@ -19,7 +19,7 @@ class MultiBoxController {
 public:
     bool begin();     // WiFi STA + esp_now_init + callbacks; false on failure
     void end();       // esp_now_deinit + WiFi off
-    void update();    // drain event queue, advance CENTER bulb timing
+    void update();    // drain event queue, advance MAIN bulb timing
 
     // Node-side actions (START/FLASH), called from MultiBox's sensor logic.
     void sendStartOrEnd(bool isEnd);
@@ -27,7 +27,16 @@ public:
 
     // Shared actions.
     void broadcastDisarm();
+    // MAIN's own TF-Luna saw the finish line crossed. Does NOT close the
+    // shutter directly -- minBulbSec is still enforced by update(), so a
+    // runner crossing early (or sensor noise just after the shutter opened)
+    // cannot cut the frame short.
+    void requestEnd();
+
     void requestExit();   // safe-disarm sequence for the UI's exit-confirm "OK"
+
+    // public: a role change mid-exposure has to be able to close the shutter
+    void forceCloseBulbIfExposing();
 
 private:
     void handleIncoming(const MBPacket& pkt, const uint8_t mac[6], unsigned long receivedAt);
@@ -36,7 +45,6 @@ private:
     void centerCloseBulbIfDue();
     void openBulb();
     void closeBulb();
-    void forceCloseBulbIfExposing();
     void nodeOnCenterBroadcast(const MBPacket& pkt, const uint8_t mac[6]);
 
     void sendTo(MBCommand cmd, const uint8_t mac[6], uint16_t sessionId);

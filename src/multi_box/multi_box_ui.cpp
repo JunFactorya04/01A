@@ -10,6 +10,7 @@
 #include "node_manager.h"
 #include "../factory_test/factory_test.h"
 #include "../common/ui_theme.h"
+#include "../common/battery_ui.h"
 
 extern FactoryTest* _ft;
 
@@ -35,7 +36,7 @@ static const char* roleName(MBRole r) {
     switch (r) {
         case MBRole::START:  return "START";
         case MBRole::FLASH:  return "FLASH";
-        case MBRole::CENTER: return "CENTER";
+        case MBRole::MAIN: return "MAIN";
         default:             return "NONE";
     }
 }
@@ -71,6 +72,9 @@ static void header(const char* title, const char* hint) {
     c->setTextColor(COLOR_TEXT);
     c->drawString("<", 5, 2);
 
+    // Battery, shared across every mode header (see battery_ui.h)
+    drawBatteryBadge(c);
+
     if (hint) {
         c->setFont(&fonts::efontCN_10);
         c->setTextDatum(top_right);
@@ -92,36 +96,197 @@ static void infoRow(int y, const char* label, const char* value, uint16_t valCol
     c->setTextDatum(top_left);
 }
 
-// ============ MAIN ============
-static void renderMain() {
+// ============ MAIN SCREEN — one per role ============
+// Every box runs the same firmware, so the role it was assigned over ESP-NOW
+// is what decides which of these three screens it shows. They deliberately do
+// NOT share a layout beyond the GEOPIX UI STANDARD frame: each role has a
+// different job and a different set of numbers worth watching in the field.
+
+// What this node is waiting for, in its own terms rather than the raw session
+// enum -- "LOCKED" means something different to a START node than to MAIN.
+static const char* roleStatusText(char* buf, size_t n) {
+    MultiBoxState& st = multiBox.state;
+
+    if (multiBox.config.role == MBRole::START) {
+        switch (st.session) {
+            case MultiBoxState::READY:
+                return st.baselineCaptured ? "WATCHING" : "CALIBRATING";
+            case MultiBoxState::LOCKED: return "SENT - WAIT MAIN";
+            default: return "IDLE";
+        }
+    }
+
+    if (multiBox.config.role == MBRole::FLASH) {
+        if (st.flashPending) {
+            long left = (long)(st.flashDueAtMs - millis());
+            if (left < 0) left = 0;
+            snprintf(buf, n, "FIRING IN %ldms", left);
+            return buf;
+        }
+        if (!st.sessionActive) return "STANDBY";
+        if (st.session == MultiBoxState::LOCKED) return "FIRED";
+        return st.baselineCaptured ? "WATCHING" : "CALIBRATING";
+    }
+
+    if (multiBox.config.role == MBRole::MAIN) {
+        switch (st.session) {
+            case MultiBoxState::EXPOSING: {
+                unsigned long sec = (millis() - st.sessionStartMs) / 1000UL;
+                snprintf(buf, n, "BULB %lus", sec);
+                return buf;
+            }
+            case MultiBoxState::REARM: return "REARM";
+            case MultiBoxState::READY: return "ARMED";
+            default: return "IDLE";
+        }
+    }
+    return "NO ROLE";
+}
+
+static uint16_t roleStatusColor() {
+    MultiBoxState& st = multiBox.state;
+    if (multiBox.config.role == MBRole::NONE) return COLOR_RED;
+    if (st.session == MultiBoxState::EXPOSING) return COLOR_YELLOW;
+    if (st.session == MultiBoxState::LOCKED)   return COLOR_BORDER;
+    if (st.session == MultiBoxState::READY)    return COLOR_GREEN;
+    return COLOR_BORDER;
+}
+
+static void renderStatusPanel() {
+    LGFX_Sprite* c = _ft->_canvas;
+    char buf[24];
+
+    // A second MAIN on the network breaks everything (both would open
+    // sessions), and it is invisible from any single box's normal status --
+    // so it takes over the panel rather than being tucked away somewhere.
+    NodeManager::Conflict conf = nodeManager.conflict();
+    if (conf != NodeManager::Conflict::NONE) {
+        const char* msg = "CONFIG CONFLICT";
+        switch (conf) {
+            case NodeManager::Conflict::DUP_ID:
+                msg = "ID IN USE - CHANGE ID"; break;
+            case NodeManager::Conflict::DUP_MAIN:
+                msg = "2x MAIN - CHANGE ROLE"; break;
+            case NodeManager::Conflict::DUP_START:
+                msg = "2x START - CHANGE ROLE"; break;
+            default: break;
+        }
+        tickBlink();
+        c->drawRoundRect(8, 113, 224, 20, 4, COLOR_RED);
+        c->setFont(&fonts::efontCN_12);
+        c->setTextDatum(middle_center);
+        c->setTextColor(s_blinkState ? COLOR_RED : COLOR_BORDER);
+        c->drawString(msg, 120, 123);
+        c->setTextDatum(top_left);
+        return;
+    }
+
+    const char* txt = roleStatusText(buf, sizeof(buf));
+
+    c->drawRoundRect(8, 113, 224, 20, 4, COLOR_BORDER);
+    c->setFont(&fonts::efontCN_12);
+    c->setTextDatum(middle_center);
+    c->setTextColor(roleStatusColor());
+    c->drawString(txt, 120, 123);
+    c->setTextDatum(top_left);
+}
+
+static void renderLinkRow(int y) {
+    MBPeer* main = nodeManager.findCenter();
+    bool linked = main && main->connected;
+    infoRow(y, "MAIN LINK", linked ? "OK" : "---", linked ? COLOR_GREEN : COLOR_RED);
+}
+
+// --- START: the box on the start line ---
+static void renderStartScreen() {
+    LGFX_Sprite* c = _ft->_canvas;
+    header("START NODE", "PRESS=SETUP");
+    c->drawRoundRect(8, 22, 224, 86, 5, COLOR_BORDER);
+
+    char buf[16];
+    infoRow(29, "JOB", "OPEN SHUTTER", COLOR_TEXT);
+    snprintf(buf, sizeof(buf), "%ucm", multiBox.config.detectThresholdCm);
+    infoRow(49, "DETECT", buf, COLOR_TEXT);
+    infoRow(69, "SENSOR", multiBox.state.baselineCaptured ? "READY" : "CALIBRATING",
+            multiBox.state.baselineCaptured ? COLOR_GREEN : COLOR_YELLOW);
+    renderLinkRow(89);
+
+    renderStatusPanel();
+}
+
+// --- FLASH: a box somewhere along the run ---
+static void renderFlashScreen() {
+    LGFX_Sprite* c = _ft->_canvas;
+    header("FLASH NODE", "PRESS=SETUP");
+    c->drawRoundRect(8, 22, 224, 86, 5, COLOR_BORDER);
+
+    char buf[16];
+    infoRow(29, "JOB", "FIRE FLASH", COLOR_TEXT);
+    snprintf(buf, sizeof(buf), "%ucm", multiBox.config.detectThresholdCm);
+    infoRow(49, "DETECT", buf, COLOR_TEXT);
+    snprintf(buf, sizeof(buf), "%ums", multiBox.config.flashDelayMs);
+    infoRow(69, "DELAY", buf, COLOR_TEXT);
+    infoRow(89, "SENSOR", multiBox.state.baselineCaptured ? "READY" : "CALIBRATING",
+            multiBox.state.baselineCaptured ? COLOR_GREEN : COLOR_YELLOW);
+
+    renderStatusPanel();
+}
+
+// --- MAIN: the box holding the camera ---
+static void renderMainScreen() {
+    LGFX_Sprite* c = _ft->_canvas;
+    header("MAIN NODE", "PRESS=SETUP");
+    c->drawRoundRect(8, 22, 224, 86, 5, COLOR_BORDER);
+
+    char buf[20];
+    snprintf(buf, sizeof(buf), "%u-%us", multiBox.config.minBulbSec, multiBox.config.maxBulbSec);
+    infoRow(29, "BULB", buf, COLOR_TEXT);
+
+    // MAIN closes the shutter with its OWN sensor, so its calibration state
+    // matters as much as a START node's -- a MAIN that never baselined can
+    // only ever end an exposure on the maxBulbSec safety cap.
+    infoRow(49, "FINISH SENSOR", multiBox.state.baselineCaptured ? "READY" : "CALIBRATING",
+            multiBox.state.baselineCaptured ? COLOR_GREEN : COLOR_YELLOW);
+
+    // The rest window is the shot-rate cap, so it belongs on the main screen
+    // next to the exposure limits rather than buried in setup.
+    if (multiBox.config.rearmMs >= 1000)
+        snprintf(buf, sizeof(buf), "%.1fs", multiBox.config.rearmMs / 1000.0f);
+    else
+        snprintf(buf, sizeof(buf), "%ums", multiBox.config.rearmMs);
+    infoRow(69, "REST", buf, COLOR_TEXT);
+
+    snprintf(buf, sizeof(buf), "%lu  N%u", (unsigned long)multiBox.state.shotCount,
+             nodeManager.connectedCount());
+    infoRow(89, "SHOTS", buf, COLOR_TEXT);
+
+    renderStatusPanel();
+}
+
+// --- no role assigned yet ---
+static void renderNoRoleScreen() {
     LGFX_Sprite* c = _ft->_canvas;
     header("MULTI BOX", "PRESS=SETUP");
     c->drawRoundRect(8, 22, 224, 86, 5, COLOR_BORDER);
 
     char buf[16];
-    infoRow(29, "ROLE", roleName(multiBox.config.role), COLOR_TEXT);
-
+    infoRow(29, "ROLE", "NOT SET", COLOR_RED);
     snprintf(buf, sizeof(buf), "%u", multiBox.config.nodeId);
     infoRow(49, "NODE ID", buf, COLOR_TEXT);
-
-    if (multiBox.config.role == MBRole::CENTER) {
-        infoRow(69, "CENTER LINK", "N/A", COLOR_BORDER);
-    } else {
-        MBPeer* center = nodeManager.findCenter();
-        bool linked = center && center->connected;
-        infoRow(69, "CENTER LINK", linked ? "OK" : "---", linked ? COLOR_GREEN : COLOR_RED);
-    }
-
+    infoRow(69, "SET A ROLE IN", "SETUP >", COLOR_BORDER);
     snprintf(buf, sizeof(buf), "%u", nodeManager.connectedCount());
-    infoRow(89, "CONNECTED NODES", buf, COLOR_TEXT);
+    infoRow(89, "NODES SEEN", buf, COLOR_TEXT);
 
-    // Bottom status panel
-    c->drawRoundRect(8, 113, 224, 20, 4, COLOR_BORDER);
-    c->setFont(&fonts::efontCN_12);
-    c->setTextDatum(middle_center);
-    c->setTextColor(sessionColor(multiBox.state.session));
-    c->drawString(sessionName(multiBox.state.session), 120, 123);
-    c->setTextDatum(top_left);
+    renderStatusPanel();
+}
+
+static void renderMain() {
+    switch (multiBox.config.role) {
+        case MBRole::START: renderStartScreen(); break;
+        case MBRole::FLASH: renderFlashScreen(); break;
+        case MBRole::MAIN:  renderMainScreen();  break;
+        default:            renderNoRoleScreen(); break;
+    }
 }
 
 // ============ CONNECTION (flat scrollable rows) ============
@@ -135,9 +300,28 @@ static void connRowLabelValue(MBConnRow row, char* label, char* value, size_t n)
             snprintf(label, n, "Role");
             snprintf(value, n, "%s", roleName(multiBox.config.role));
             break;
-        case MBConnRow::SIGNAL:
-            snprintf(label, n, "Signal");
-            snprintf(value, n, "%s", multiBox.config.signalMode == MBSignalMode::EMIT_END ? "END" : "START");
+        case MBConnRow::DETECT:
+            snprintf(label, n, "Detect");
+            snprintf(value, n, "%ucm", multiBox.config.detectThresholdCm);
+            break;
+        case MBConnRow::FLASH_DELAY:
+            snprintf(label, n, "Flash Delay");
+            snprintf(value, n, "%ums", multiBox.config.flashDelayMs);
+            break;
+        case MBConnRow::MIN_BULB:
+            snprintf(label, n, "Min Bulb");
+            snprintf(value, n, "%us", multiBox.config.minBulbSec);
+            break;
+        case MBConnRow::MAX_BULB:
+            snprintf(label, n, "Max Bulb");
+            snprintf(value, n, "%us", multiBox.config.maxBulbSec);
+            break;
+        case MBConnRow::REARM:
+            snprintf(label, n, "Rest");
+            if (multiBox.config.rearmMs >= 1000)
+                snprintf(value, n, "%.1fs", multiBox.config.rearmMs / 1000.0f);
+            else
+                snprintf(value, n, "%ums", multiBox.config.rearmMs);
             break;
         case MBConnRow::PAIR:
             snprintf(label, n, "Pair / Add Node");
@@ -276,6 +460,37 @@ static void renderPeerList() {
     }
 }
 
+// ============ DISRUPTIVE-CHANGE CONFIRM ============
+static void renderConfirmDisrupt() {
+    LGFX_Sprite* c = _ft->_canvas;
+    header("SHOT IN PROGRESS", nullptr);
+    c->drawRoundRect(8, 22, 224, 86, 5, COLOR_BORDER);
+
+    bool removing = multiBox.editMode.pending == MultiBoxEditMode::PEND_REMOVE_PEER;
+
+    c->setFont(&fonts::efontCN_12);
+    c->setTextDatum(top_center);
+    c->setTextColor(COLOR_TEXT);
+    c->drawString(removing ? "Removing this node will" : "Changing this will reset", 120, 38);
+    c->drawString(removing ? "interrupt the run." : "this box and end the run.", 120, 54);
+    c->setTextDatum(top_left);
+
+    bool cancelSel = multiBox.editMode.confirmChoice == 0;
+    int y = 78;
+
+    c->fillRoundRect(20, y, 90, 20, 4, cancelSel ? COLOR_HIGHLIGHT : COLOR_BG);
+    c->drawRoundRect(20, y, 90, 20, 4, COLOR_BORDER);
+    c->setTextDatum(middle_center);
+    c->setTextColor(cancelSel ? COLOR_BG : COLOR_TEXT);
+    c->drawString("CANCEL", 65, y + 10);
+
+    c->fillRoundRect(130, y, 90, 20, 4, cancelSel ? COLOR_BG : COLOR_HIGHLIGHT);
+    c->drawRoundRect(130, y, 90, 20, 4, COLOR_BORDER);
+    c->setTextColor(cancelSel ? COLOR_TEXT : COLOR_BG);
+    c->drawString("CONTINUE", 175, y + 10);
+    c->setTextDatum(top_left);
+}
+
 // ============ EXIT CONFIRM ============
 static void renderConfirmExit() {
     LGFX_Sprite* c = _ft->_canvas;
@@ -310,6 +525,10 @@ void renderMultiBoxUI() {
     _ft->_canvas->setTextWrap(false);
     _ft->_canvas->fillScreen(COLOR_BG);
 
+    if (multiBox.editMode.state == MultiBoxEditMode::CONFIRM_DISRUPT) {
+        renderConfirmDisrupt();
+        return;
+    }
     if (multiBox.editMode.state == MultiBoxEditMode::CONFIRM_EXIT) {
         renderConfirmExit();
     } else if (multiBox.editMode.screen == MultiBoxEditMode::MAIN) {

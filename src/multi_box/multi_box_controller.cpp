@@ -108,6 +108,13 @@ void MultiBoxController::openBulb() {
 
     multiBox.state.bulbFiredG2 = fireG2;
     multiBox.state.bulbFiredG1 = fireG1;
+
+    // 3rd channel: hold the camera's shutter over BLE as well, same as
+    // Timelapse's bulb path. Done AFTER the GPIO lines are already HIGH so
+    // the physical exposure never waits on the radio. Only a press that
+    // actually reached the camera is released later.
+    multiBox.state.bulbFiredBLE = triggerMode.pressBluetoothShutterIfEnabled();
+
     // Trigger lock is released in closeBulb()/forceCloseBulbIfExposing() —
     // it must stay held for the whole exposure, not just the pulse edges.
 }
@@ -117,6 +124,12 @@ void MultiBoxController::closeBulb() {
     if (multiBox.state.bulbFiredG1) digitalWrite(TRIGGER_G1_PIN, LOW);
     multiBox.state.bulbFiredG2 = false;
     multiBox.state.bulbFiredG1 = false;
+
+    if (multiBox.state.bulbFiredBLE) {
+        triggerMode.releaseBluetoothShutterIfEnabled();
+        multiBox.state.bulbFiredBLE = false;
+    }
+
     releaseTriggerLock();
 }
 
@@ -125,12 +138,12 @@ void MultiBoxController::forceCloseBulbIfExposing() {
     closeBulb();
 }
 
-// ============ CENTER coordinator ============
+// ============ MAIN coordinator ============
 
 void MultiBoxController::centerOnStart(const MBPacket& pkt, const uint8_t mac[6]) {
     MBPeer* sender = nodeManager.findByMac(mac);
     if (!sender || sender->role != MBRole::START) return;          // unknown/wrong-role sender
-    if (!nodeManager.acceptSequence(sender->nodeId, pkt.sequence)) return;   // dup/stale
+    if (!nodeManager.acceptSequence(mac, pkt.sequence)) return;   // dup/stale
     if (multiBox.state.session != MultiBoxState::READY) return;    // only one session at a time
 
     uint16_t sid = nextSessionId();
@@ -148,10 +161,19 @@ void MultiBoxController::centerOnStart(const MBPacket& pkt, const uint8_t mac[6]
 void MultiBoxController::centerOnEndDetect(const MBPacket& pkt, const uint8_t mac[6]) {
     MBPeer* sender = nodeManager.findByMac(mac);
     if (!sender || sender->role != MBRole::START) return;
-    if (!nodeManager.acceptSequence(sender->nodeId, pkt.sequence)) return;
+    if (!nodeManager.acceptSequence(mac, pkt.sequence)) return;
     if (multiBox.state.session != MultiBoxState::EXPOSING) return;
     if (pkt.sessionId != multiBox.state.currentSessionId) return;   // stale session
 
+    multiBox.state.endRequested = true;
+}
+
+void MultiBoxController::requestEnd() {
+    // Same gate the remote END_DETECT path uses -- only meaningful while the
+    // shutter is actually open. minBulbSec is enforced in
+    // centerCloseBulbIfDue(), not here.
+    if (multiBox.config.role != MBRole::MAIN) return;
+    if (multiBox.state.session != MultiBoxState::EXPOSING) return;
     multiBox.state.endRequested = true;
 }
 
@@ -179,20 +201,19 @@ void MultiBoxController::centerCloseBulbIfDue() {
     }
 }
 
-// ============ Non-CENTER node reacting to CENTER's broadcasts ============
+// ============ Non-MAIN node reacting to MAIN's broadcasts ============
 
 void MultiBoxController::nodeOnCenterBroadcast(const MBPacket& pkt, const uint8_t mac[6]) {
     MBPeer* sender = nodeManager.findByMac(mac);
-    if (!sender || sender->role != MBRole::CENTER) return;   // only trust our paired CENTER
-    if (!nodeManager.acceptSequence(sender->nodeId, pkt.sequence)) return;
+    if (!sender || sender->role != MBRole::MAIN) return;   // only trust our paired MAIN
+    if (!nodeManager.acceptSequence(mac, pkt.sequence)) return;
 
     switch ((MBCommand)pkt.command) {
         case MBCommand::START:
             multiBox.state.currentSessionId = pkt.sessionId;
             multiBox.state.sessionActive = true;
             multiBox.state.baselineCaptured = false;   // re-baseline for this session
-            if (multiBox.config.role == MBRole::START &&
-                multiBox.config.signalMode == MBSignalMode::EMIT_START) {
+            if (multiBox.config.role == MBRole::START) {
                 // The node that fired the START itself already locked at send
                 // time; this just keeps it in sync if it somehow missed that.
                 multiBox.state.session = MultiBoxState::LOCKED;
@@ -222,6 +243,30 @@ void MultiBoxController::handleIncoming(const MBPacket& pkt, const uint8_t mac[6
 
     MBCommand cmd = (MBCommand)pkt.command;
 
+    // Identity upkeep, driven by the heartbeat and the discovery handshake
+    // rather than by every packet. Doing it on session traffic too would mean
+    // running it BEFORE acceptSequence(), so a stale duplicate could flip a
+    // peer's role back and forth and trigger an NVS write each time.
+    if (cmd == MBCommand::PING || cmd == MBCommand::PONG ||
+        cmd == MBCommand::HELLO || cmd == MBCommand::HELLO_ACK) {
+
+        nodeManager.refreshPeerRole(mac, (MBRole)pkt.role);
+
+        // Same node id from a different box: their sequence counters would
+        // collide and silently reject each other's packets.
+        if (nodeManager.nodeIdClashes(pkt.nodeId, mac)) {
+            nodeManager.noteConflict(NodeManager::Conflict::DUP_ID);
+        }
+        // Only one MAIN (both would open sessions) and only one START (both
+        // would race to open the same one) can exist on a network.
+        else if (nodeManager.selfRole() == (MBRole)pkt.role) {
+            if ((MBRole)pkt.role == MBRole::MAIN)
+                nodeManager.noteConflict(NodeManager::Conflict::DUP_MAIN);
+            else if ((MBRole)pkt.role == MBRole::START)
+                nodeManager.noteConflict(NodeManager::Conflict::DUP_START);
+        }
+    }
+
     if (cmd == MBCommand::HELLO) {
         if (nodeManager.selfRole() != MBRole::NONE) {
             sendTo(MBCommand::HELLO_ACK, mac, 0);
@@ -245,7 +290,7 @@ void MultiBoxController::handleIncoming(const MBPacket& pkt, const uint8_t mac[6
 
     if (!nodeManager.isKnownMac(mac)) return;   // everything else needs a paired sender
 
-    if (nodeManager.selfRole() == MBRole::CENTER) {
+    if (nodeManager.selfRole() == MBRole::MAIN) {
         switch (cmd) {
             case MBCommand::START:      centerOnStart(pkt, mac); break;
             case MBCommand::END_DETECT: centerOnEndDetect(pkt, mac); break;
@@ -270,7 +315,7 @@ void MultiBoxController::update() {
         handleIncoming(ev.pkt, ev.mac, ev.receivedAt);
     }
 
-    if (nodeManager.selfRole() == MBRole::CENTER) {
+    if (nodeManager.selfRole() == MBRole::MAIN) {
         centerCloseBulbIfDue();
     }
 }
