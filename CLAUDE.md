@@ -376,6 +376,52 @@ reported bug, "fires 1 shot per second" with no real spacing). The fix: when `to
 at the start of the edit, leave `intervalMs` untouched and just set `totalShots` directly;
 Duration then follows naturally instead of being derived from an ungrounded baseline.
 
+### Battery reporting and the low-battery guard
+
+`src/common/battery.h/.cpp` is the single source for anything battery-related. It replaced
+`analogReadMilliVolts(10) * 2` copy-pasted at four call sites, none of which filtered the reading
+or turned it into something a user could act on. The launcher shows a percentage instead of raw
+volts, and `drawBatteryBadge()` (`src/common/battery_ui.h`) puts the same figure in **every mode
+header** — battery used to be visible only at the launcher, so a multi-hour timelapse gave no
+indication at all once you entered the mode. The badge sits on the LEFT of the header: the right
+edge is already taken in several modes (Auto Mode's frame rate, Sleep & Wake's date).
+
+**Filtering is not optional here.** Measured on real hardware, raw readings swing about ±200mV on
+a battery that is not changing — ~23 percentage points of pure jitter. Two stages, because the
+noise has two characters: a **median** of a 9-sample burst rejects individual spikes (firing a
+trigger, the BLE radio transmitting), and an **EMA across sampling ticks** removes the slow wander
+that a burst cannot touch, since all samples in a 2ms window share the same error.
+`batteryMilliVolts()` is cheap to call every frame — the blocking burst is internally rate-limited.
+
+**Charging/full cannot be detected and this was measured, not assumed.** Only the ADC pin is wired:
+no PMIC, no charger STAT line on any GPIO. With filtering settled, USB read 3810mV and the 18650
+alone read 3838mV — 28mV apart, indistinguishable. (An earlier unfiltered comparison appeared to
+show a 200mV gap; that was the ADC noise the filter now removes.) The reference project this logic
+came from confirms it from the other side: its `isCharging()` exists **only** for boards with an
+AXP192 PMIC, with no analog fallback. `batteryCharging()` is therefore hard false unless
+`BATTERY_CHARGE_STAT_PIN` is defined — wire a charger's STAT pin to any free GPIO (6/7/8/9/11/12/
+14/16/17/18/21 are unused) and the charging bolt in the header lights up for real.
+
+**Two deliberate deviations from that reference implementation — don't "restore" them.** Its
+percentage divides by `FULL - (EMPTY + 50)`, so a full pack computes to 106% before clamping (a
+full battery and one 50mV down both read 100%); corrected here. And it takes a single ADC sample,
+for the reasons above. The linear voltage→percent map is an acknowledged approximation — real
+Li-ion curves are flat through the middle — and improving it needs actual discharge measurements
+on this pack rather than a datasheet curve that would look precise without being accurate.
+
+**The guard** is `FactoryTest::_battery_guard_tick()`, called once per loop in every mode beside
+`_display_power_save_tick()`. Warn at 3500mV (one chirp, red badge, never interrupts a running
+shoot); shut down at 3300mV. **Both require the condition to hold CONTINUOUSLY** — 10s to warn, 60s
+to shut down — and any reading back above the threshold resets the timer. This is what stops a load
+sag from being read as a flat battery: BLE transmitting, TF-Luna polling and the trigger GPIOs all
+pull the rail down briefly, and an 18650 under this device's draw sags tens of millivolts, not the
+~500mV it would take to sit at the critical threshold for a full minute while still holding charge.
+
+Critical shutdown does **not** call `_power_off()` directly. It sets `_mode_exit_requested`, so the
+mode runs its own clean-exit path — which is what releases a held bulb exposure and saves config —
+and the launcher powers down afterwards. Cutting power from inside a render loop would leave a
+camera's shutter open, the exact failure this codebase spends so much effort avoiding.
+
 ### Power-on sequence is brownout-sensitive
 
 `FactoryTest::_power_on()` (`src/factory_test/components/ft_key_test.cpp`) latches
@@ -539,7 +585,7 @@ secondary service UUIDs) — there is no fallback or detection message for that 
 
 `src/multi_box/` — a wireless multi-node system, separate from the BLE camera remote (different
 radio stack: native ESP-NOW over WiFi, `esp_now.h` bundled with arduino-esp32, no third-party
-library). All boxes run identical firmware; **role** (`MBRole`: NONE/START/FLASH/CENTER) and
+library). All boxes run identical firmware; **role** (`MBRole`: NONE/START/FLASH/MAIN) and
 **Node ID** are just config, edited in MULTI BOX's own CONNECTION screen. Four abstractions, per
 `src/multi_box/*.h`: `MultiBoxProtocol` (the wire format — one packed `MBPacket` struct + a
 `MBCommand` enum covering HELLO/HELLO_ACK/READY/START/START_ACK/FLASH_FIRE/END_DETECT/SHOT_DONE/
@@ -548,26 +594,72 @@ bookkeeping + per-sender sequence/replay validation), `MultiBoxController` (owns
 and the actual recv callback, plus the session state machine), and `FlashTrigger` (pluggable
 one-method interface for a FLASH node's physical output — see below).
 
-**Roles and the shooting flow**: a **START** node runs TF-Luna baseline+threshold detection (like
-Auto Shoot's zone logic, but reimplemented here rather than shared, since Auto Shoot's own state
-must not be touched) and, depending on its own `config.signalMode`, either opens a session
-(`EMIT_START`, watches only while no session is active) or closes one (`EMIT_END`, watches only
-*while* a session is active — the "finish line"). This is how two START nodes (start-line +
-finish-line) stay one role type rather than needing a 4th role — `signalMode` is the actual
-distinguishing config, editable per-node in CONNECTION's Signal row (only shown when role ==
-START). A **FLASH** node runs the same baseline+threshold logic gated on session-active, and on
-crossing calls `flashTrigger.fire()` (currently `StubFlashTrigger` — logs only, no hardware wired)
-plus sends `FLASH_FIRE` to CENTER purely for status/logging; this is deliberately independent of
-the camera's own flash sync, which stays whatever it already does. **CENTER** is the session
-coordinator: on a valid `START` it opens the bulb (mirrors — but is a separate, duplicated
-implementation of — Timelapse's own non-blocking bulb-hold pattern, since Timelapse must not be
-touched; see `MultiBoxController::openBulb()`/`closeBulb()`), keeps it open until *both*
-`config.minBulbSec` has elapsed *and* an `END_DETECT` has arrived (min-bulb-time is a floor, not a
-ceiling), broadcasts `SHOT_DONE`, waits `config.rearmMs`, then broadcasts `READY`. A
-`config.maxBulbSec` safety cap force-closes the bulb regardless of `END_DETECT` if it never
-arrives (lost node/packet) — same "never leave the shutter open on a broken path" principle as
-Timelapse's `forceReleaseBulbIfExposing()`, not something the original request spelled out but
-consistent with how every other exposure-holding path in this codebase already behaves.
+**Roles and the shooting flow.** Reworked to the operator's actual use case: this mode shoots
+**bulb only**, and the shutter is bracketed by two TF-Luna crossings rather than by a timer or a
+button.
+
+```
+START  TF-Luna sees the athlete  --ESP-NOW-->  MAIN opens the shutter (bulb)
+       goes LOCKED, stops detecting            athlete runs... FLASH fires mid-run
+                                               MAIN's OWN TF-Luna sees the athlete
+                                               -> closes the shutter, cycle done
+                                               -> broadcasts SHOT_DONE, then READY
+START  resumes detecting
+```
+
+**MAIN** (renamed from CENTER; the enum value stays `3` so boxes that already persisted a role keep
+it) is the box wired to the camera. It is no longer a passive coordinator: it runs TF-Luna itself
+and closes the exposure on its own finish-line detection, via
+`MultiBoxController::requestEnd()`. Two non-obvious details there, both deliberate:
+
+- **MAIN baselines *before* the shutter opens.** Its watch window starts the instant the exposure
+  does, and baselining takes `MB_BASELINE_SAMPLES` readings — measuring from scratch at that moment
+  would leave MAIN blind through the start of every exposure, exactly when the runner is closest to
+  it. `captureBaselineStep()` runs while MAIN waits so it arrives at EXPOSING with a settled
+  reference.
+- **`requestEnd()` does not close the shutter**, it raises a flag that `centerCloseBulbIfDue()`
+  still gates on `minBulbSec`. Sensor noise just after the shutter opened, or someone crossing
+  early, must not cut the frame short.
+
+`MBSignalMode` (EMIT_START / EMIT_END) was **removed**: with MAIN detecting the finish line itself,
+a second START node acting as the finish line was a redundant second way to do the same thing, and
+it put a meaningless row in START's menu. The `END_DETECT` command is still in the protocol and
+MAIN still handles it, so a remote finish line can be added later without a protocol change —
+nothing in this firmware sends it now.
+
+**Bulb actuation mirrors Timelapse's fixed path**: `openBulb()` holds G1/G2 *and* calls
+`TriggerMode::pressBluetoothShutterIfEnabled()`, recording the result in `state.bulbFiredBLE` so
+only a press that actually reached the camera is released. `closeBulb()` and
+`forceCloseBulbIfExposing()` both release, so nothing can leave a shutter open.
+
+**FLASH** watches while a session is active and fires a real trigger pulse — `GpioFlashTrigger`
+replaced the old logging-only stub. A flash sync input is the same dry contact a camera's remote
+port is, so it reuses G1/G2 (honouring `TriggerMode`'s enables) rather than needing its own pin.
+`config.flashDelayMs` (0-5000ms) delays the pulse after detection, since the sensor sees the
+athlete *arriving* while the shot usually wants them further along. The wait is a timestamp checked
+each tick (`state.flashPending`/`flashDueAtMs`), never a `delay()` — blocking would stall ESP-NOW
+receive handling and rendering for its whole duration.
+
+**Per-role UI.** Every box runs identical firmware, so the assigned role decides what it shows:
+`renderStartScreen()` / `renderFlashScreen()` / `renderMainScreen()`, plus a no-role screen. The
+CONNECTION (setup) row set is role-dependent too, via `connRowKind()`/`connRowCount()` — START and
+FLASH get `Detect`, FLASH also gets `Flash Delay`, MAIN also gets `Min Bulb`/`Max Bulb`/`Rest`.
+Both live behind those two functions specifically because the row set changes underneath input
+handling and rendering whenever the role changes. **These four shooting parameters were persisted
+to NVS from the start but had no UI at all** — they could only ever run at their defaults; that was
+a real bug, not a missing nicety.
+
+**Overload guards**, for the case the operator flagged: people crossing in a *queue* rather than one
+at a time, which can otherwise fire shots faster than the camera can write them.
+`centerOnStart()`'s `session != READY` check is the primary one and predates this work — while
+exposing or resting, every incoming START is ignored, so two bulbs can never open at once. On top
+of that, `minBulbSec` guarantees a floor on each exposure (someone still standing in front of MAIN
+when the next exposure opens would otherwise end it instantly), and `rearmMs` — surfaced as
+**Rest**, range widened to 60s and shown on MAIN's main screen — is a floor on the gap between
+shots, which directly caps the shot rate however many people cross.
+
+**Not hardware-verified.** All of the above compiles and the UI was checked on one box, but the
+ESP-NOW cycle needs at least two boxes to exercise. Treat the whole flow as untested.
 
 **Anti-replay/staleness**: the ESP-NOW receive callback (`espNowRecvCallback` in
 `multi_box_controller.cpp`) only validates packet size and pushes to a FreeRTOS queue — it never
