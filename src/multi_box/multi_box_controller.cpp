@@ -136,6 +136,13 @@ void MultiBoxController::closeBulb() {
 void MultiBoxController::forceCloseBulbIfExposing() {
     if (multiBox.state.session != MultiBoxState::EXPOSING) return;
     closeBulb();
+
+    // Leaving the session on EXPOSING after physically closing the shutter is
+    // a lie the UI then reports forever -- the bulb timer kept counting up
+    // after STOP because this returned without moving the state on. Callers
+    // that want a different end state (requestExit -> IDLE) still set it after.
+    multiBox.state.session = MultiBoxState::READY;
+    multiBox.state.endRequested = false;
 }
 
 // ============ MAIN coordinator ============
@@ -168,13 +175,48 @@ void MultiBoxController::centerOnEndDetect(const MBPacket& pkt, const uint8_t ma
     multiBox.state.endRequested = true;
 }
 
+void MultiBoxController::simulateStart() {
+    if (multiBox.state.session != MultiBoxState::READY) return;   // same guard as centerOnStart()
+
+    uint16_t sid = nextSessionId();
+    multiBox.state.currentSessionId = sid;
+    multiBox.state.session = MultiBoxState::EXPOSING;
+    multiBox.state.sessionStartMs = millis();
+    multiBox.state.endRequested = false;
+    multiBox.state.endDueAtMs = 0;
+
+    openBulb();
+
+    // Broadcast anyway: harmless with no peers, and it means a FLASH node can
+    // be tested against this without needing a START node as well.
+    broadcastTo(MBCommand::START, sid);
+}
+
 void MultiBoxController::requestEnd() {
     // Same gate the remote END_DETECT path uses -- only meaningful while the
     // shutter is actually open. minBulbSec is enforced in
     // centerCloseBulbIfDue(), not here.
     if (multiBox.config.role != MBRole::MAIN) return;
     if (multiBox.state.session != MultiBoxState::EXPOSING) return;
+    if (multiBox.state.endRequested) return;   // already armed; don't restart the delay
+
+    // minBulbSec is an IGNORE WINDOW, not a deferred close. Inside it the
+    // sensor is disregarded completely rather than latching a close that then
+    // fires the instant the window ends.
+    //
+    // Latching was both semantically wrong and visibly wrong: a stray reading
+    // in the first second of a 9s minimum would end the frame at exactly 9s
+    // instead of waiting for a real crossing, and the UI jumped to its
+    // "detected" phase and sat frozen there for the rest of the window, which
+    // reads as the device having hung.
+    unsigned long elapsed = millis() - multiBox.state.sessionStartMs;
+    if (elapsed < (unsigned long)multiBox.config.minBulbSec * 1000UL) return;
+
     multiBox.state.endRequested = true;
+    // Hold the close for endDelayMs so the subject can clear the frame. Stored
+    // as a deadline rather than slept on -- blocking here would stall the
+    // whole loop, and the exposure is still running while we wait.
+    multiBox.state.endDueAtMs = millis() + multiBox.config.endDelayMs;
 }
 
 void MultiBoxController::centerCloseBulbIfDue() {
@@ -183,7 +225,13 @@ void MultiBoxController::centerCloseBulbIfDue() {
         bool minReached = elapsed >= (unsigned long)multiBox.config.minBulbSec * 1000UL;
         bool maxReached = elapsed >= (unsigned long)multiBox.config.maxBulbSec * 1000UL;
 
-        if ((multiBox.state.endRequested && minReached) || maxReached) {
+        // endRequested can only be set after minBulbSec has passed (see
+        // requestEnd()), so minReached is a redundant guard here -- kept
+        // because it costs nothing and the invariant is worth stating twice.
+        bool endDue = multiBox.state.endRequested &&
+                      (long)(millis() - multiBox.state.endDueAtMs) >= 0;
+
+        if ((endDue && minReached) || maxReached) {
             closeBulb();
             multiBox.state.shotCount++;
             multiBox.state.session = MultiBoxState::REARM;

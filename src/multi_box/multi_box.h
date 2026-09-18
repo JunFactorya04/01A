@@ -36,11 +36,29 @@ struct MultiBoxConfig {
     uint16_t     maxBulbSec = 30;                      // MAIN: safety cap, never open longer
     uint16_t     rearmMs = 1000;                       // MAIN: 0-60000ms
 
+    // MAIN: how long after the finish line is crossed the shutter actually
+    // closes. The sensor fires the moment the subject ENTERS its beam; a
+    // runner still has to clear the frame, so closing on that instant cuts
+    // them off. Fine-grained (100ms steps) because this is tuned against a
+    // real subject's speed, where a second either way is visible.
+    uint16_t     endDelayMs = 0;                       // MAIN: 0-10000ms
+
     // FLASH: how long after the athlete is detected the flash actually fires.
     // The sensor sees them ARRIVING at the box; the shot usually wants them a
     // little further along, so this shifts the illumination to where the
     // subject should be rather than where they were first seen.
     uint16_t     flashDelayMs = 0;                     // FLASH: 0-5000ms
+
+    // Range filter, same idea as Auto Shoot's: ignore returns outside a
+    // distance band entirely. Detection here is baseline-deviation, so this is
+    // a PRE-filter -- a reading outside the band is treated as no reading at
+    // all, and does not feed the baseline either. Stops distant background
+    // (a car on the far side, a passer-by well beyond the lane) from moving
+    // the baseline or tripping the threshold. Off by default: the plain
+    // baseline model is what has been tested.
+    bool         rangeFilterEnabled = false;
+    uint16_t     rangeMinCm = 0;                       // 0..3000
+    uint16_t     rangeMaxCm = 800;                     // 0..3000
 };
 
 // ============ CONNECTION STATE — deliberately separate from session state ====
@@ -60,7 +78,8 @@ struct MultiBoxState {
 
     unsigned long sessionStartMs = 0; // MAIN: bulb-open time; also reused as rearm-start
     unsigned long lockStartMs = 0;    // START/FLASH: when this node fired
-    bool endRequested = false;        // MAIN: END_DETECT received, waiting for min time
+    bool endRequested = false;        // MAIN: finish line crossed, waiting to close
+    unsigned long endDueAtMs = 0;     // MAIN: earliest close time, = detection + endDelayMs
     bool bulbFiredG1 = false;
     bool bulbFiredG2 = false;
     bool bulbFiredBLE = false;   // BLE shutter press landed -> must be released
@@ -111,8 +130,9 @@ struct MultiBoxEditMode {
 enum class MBConnRow : uint8_t {
     NODE_ID, ROLE,
     DETECT,                      // START / FLASH / MAIN
+    RANGE_ON, RANGE_MIN, RANGE_MAX,   // all sensing roles
     FLASH_DELAY,                 // FLASH only
-    MIN_BULB, MAX_BULB, REARM,   // MAIN only
+    MIN_BULB, MAX_BULB, REARM, END_DELAY,   // MAIN only
     PAIR, NODES, BACK,
 };
 
@@ -126,6 +146,22 @@ public:
     void teardown();   // leaving the mode (normal, non-exit-dialog path): just persist
     void loadConfig();
     void saveConfig();
+
+    // Persists the shooting parameters WITHOUT touching identity (node id /
+    // role). FOR DEVELOP borrows this box as MAIN for the duration of a bench
+    // session; saving through saveConfig() there would write that borrowed
+    // role into NVS and leave a box permanently reconfigured if it lost power
+    // on the bench.
+    void saveParams();
+
+    // Public so a harness can bring the sensor up after taking a role at
+    // runtime -- init() only starts it for whatever role the box had on entry.
+    void ensureSensorStarted();
+
+    // A usable sensor reading, honouring the range filter. Everything in this
+    // mode goes through here rather than calling tfLuna.hasObject() directly,
+    // so the filter cannot be applied in one place and forgotten in another.
+    bool sensorValid() const;
 
     void update();     // per-loop tick
 
@@ -146,14 +182,17 @@ public:
     }
 
     uint8_t connRowCount() const {
-        if (config.role == MBRole::NONE)  return 5;           // no role: nothing to tune yet
-        if (config.role == MBRole::MAIN)  return 9;           // + detect + min/max bulb + rearm
-        if (config.role == MBRole::FLASH) return 7;           // + detect + flash delay
-        return 6;                                             // START: + detect
+        // 2 identity + sensor block (detect + 3 range rows) + role extras + 3 trailing.
+        if (config.role == MBRole::NONE)  return 5;   // no role: nothing to tune yet
+        if (config.role == MBRole::MAIN)  return 13;  // + bulb min/max, rest, end delay
+        if (config.role == MBRole::FLASH) return 10;  // + flash delay
+        return 9;                                     // START
     }
     MBConnRow connRowKind(uint8_t visualIdx) const;
 
 private:
+    bool _sensorStarted = false;
+
     void applyRoleChange();
     void autoClaimMainIfScanFinished();
     void applyRoleSensorLogic();

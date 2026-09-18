@@ -13,6 +13,10 @@ MultiBox multiBox;
 #define KEY_MIN_BULB   "mbMinBulb"
 #define KEY_MAX_BULB   "mbMaxBulb"
 #define KEY_FLASH_DLY  "mbFlashDly"
+#define KEY_END_DLY    "mbEndDly"
+#define KEY_RANGE_EN   "mbRngEn"
+#define KEY_RANGE_MIN  "mbRngMin"
+#define KEY_RANGE_MAX  "mbRngMax"
 #define KEY_REARM_MS   "mbRearmMs"
 
 #define MB_BASELINE_SAMPLES 5
@@ -28,6 +32,10 @@ void MultiBox::loadConfig() {
     config.maxBulbSec = p.getUShort(KEY_MAX_BULB, 30);
     config.rearmMs = p.getUShort(KEY_REARM_MS, 1000);
     config.flashDelayMs = p.getUShort(KEY_FLASH_DLY, 0);
+    config.endDelayMs = p.getUShort(KEY_END_DLY, 0);
+    config.rangeFilterEnabled = p.getBool(KEY_RANGE_EN, false);
+    config.rangeMinCm = p.getUShort(KEY_RANGE_MIN, 0);
+    config.rangeMaxCm = p.getUShort(KEY_RANGE_MAX, 800);
     p.end();
 
     if (config.minBulbSec < 1) config.minBulbSec = 1;
@@ -38,7 +46,10 @@ void MultiBox::saveConfig() {
     nodeManager.setSelfNodeId(config.nodeId);
     nodeManager.setSelfRole(config.role);
     nodeManager.saveAll();
+    saveParams();
+}
 
+void MultiBox::saveParams() {
     Preferences p;
     p.begin(NVS_NS);
     p.putUShort(KEY_THRESH_CM, config.detectThresholdCm);
@@ -46,6 +57,10 @@ void MultiBox::saveConfig() {
     p.putUShort(KEY_MAX_BULB, config.maxBulbSec);
     p.putUShort(KEY_REARM_MS, config.rearmMs);
     p.putUShort(KEY_FLASH_DLY, config.flashDelayMs);
+    p.putUShort(KEY_END_DLY, config.endDelayMs);
+    p.putBool(KEY_RANGE_EN, config.rangeFilterEnabled);
+    p.putUShort(KEY_RANGE_MIN, config.rangeMinCm);
+    p.putUShort(KEY_RANGE_MAX, config.rangeMaxCm);
     p.end();
 }
 
@@ -59,9 +74,29 @@ void MultiBox::init() {
         state.session = (config.role == MBRole::NONE) ? MultiBoxState::IDLE : MultiBoxState::READY;
     }
 
-    if (config.role != MBRole::NONE && config.role != MBRole::MAIN) {
-        tfLuna.begin();
-    }
+    ensureSensorStarted();
+}
+
+// TF-Luna is needed by EVERY assigned role now, MAIN included -- MAIN detects
+// the finish line itself. This used to exclude MAIN, left over from when it
+// was a passive coordinator that never read the sensor; the exclusion survived
+// the rework and would have meant MAIN silently never seeing anyone cross,
+// with every exposure ending on the maxBulbSec safety cap instead. That reads
+// in the field like a dead sensor, not like a missing begin().
+//
+// Guarded by a flag rather than called blindly: begin() re-runs bus recovery
+// and the frame-rate handshake, which is not something to repeat on a role
+// change if the sensor is already up.
+bool MultiBox::sensorValid() const {
+    if (!config.rangeFilterEnabled) return tfLuna.hasObject();
+    return tfLuna.inRange(config.rangeMinCm / 100.0f, config.rangeMaxCm / 100.0f);
+}
+
+void MultiBox::ensureSensorStarted() {
+    if (_sensorStarted) return;
+    if (config.role == MBRole::NONE) return;   // no role, no sensor work to do
+    tfLuna.begin();
+    _sensorStarted = true;
 }
 
 void MultiBox::teardown() {
@@ -112,6 +147,10 @@ void MultiBox::autoClaimMainIfScanFinished() {
 //      the network while this box already behaved as the NEW one.
 void MultiBox::applyRoleChange() {
     multiBoxController.forceCloseBulbIfExposing();
+
+    // A box given a sensing role while already inside the mode still needs the
+    // sensor brought up -- init() only ran for whatever role it had on entry.
+    ensureSensorStarted();
 
     nodeManager.setSelfRole(config.role);   // advertise the new role immediately
 
@@ -176,7 +215,7 @@ void MultiBox::applyRoleSensorLogic() {
         return;
     }
 
-    if (!tfLuna.hasObject()) return;
+    if (!sensorValid()) return;
 
     float deltaM = fabsf(tfLuna.getDistance() - state.baselineDistance);
     if (deltaM * 100.0f < config.detectThresholdCm) return;   // below threshold
@@ -206,7 +245,7 @@ void MultiBox::applyRoleSensorLogic() {
 // needs to run it outside its watch window too (see applyRoleSensorLogic()).
 void MultiBox::captureBaselineStep() {
     if (state.baselineCaptured) return;
-    if (!tfLuna.hasObject()) return;   // wait for a valid reading before baselining
+    if (!sensorValid()) return;   // wait for a usable reading before baselining
     if (state.baselineSamples == 0) state.baselineDistance = 0.0f;
     state.baselineDistance += tfLuna.getDistance();
     state.baselineSamples++;
@@ -217,11 +256,20 @@ void MultiBox::captureBaselineStep() {
 }
 
 void MultiBox::update() {
-    if (config.role == MBRole::NONE) return;
-
+    // Networking and discovery run REGARDLESS of role. A box with no role yet
+    // is precisely the box that needs them: it is the one scanning, and the
+    // received-packet queue is only drained inside multiBoxController.update(),
+    // so gating that on having a role meant an unassigned box never processed
+    // a single HELLO_ACK -- its scan could never find anything, never finish
+    // (nodeManager.tick() closes the window), and never auto-claim MAIN.
+    // Pairing from a fresh box, which is the first thing anyone does, was
+    // therefore impossible.
     nodeManager.tick();
     multiBoxController.update();
     autoClaimMainIfScanFinished();
+
+    if (config.role == MBRole::NONE) return;   // no job assigned: nothing further to do
+
     applyRoleSensorLogic();
 
     // FLASH: the delayed pulse. Checked every tick rather than slept through,
@@ -268,8 +316,12 @@ MBConnRow MultiBox::connRowKind(uint8_t visualIdx) const {
     // Role-specific block. Sized to match connRowCount() -- change both.
     uint8_t i = visualIdx - 2;
     if (config.role != MBRole::NONE) {
+        // Sensor block, shared by every sensing role.
         if (i == 0) return MBConnRow::DETECT;
-        i--;
+        if (i == 1) return MBConnRow::RANGE_ON;
+        if (i == 2) return MBConnRow::RANGE_MIN;
+        if (i == 3) return MBConnRow::RANGE_MAX;
+        i -= 4;
         if (config.role == MBRole::FLASH) {
             if (i == 0) return MBConnRow::FLASH_DELAY;
             i--;
@@ -278,7 +330,8 @@ MBConnRow MultiBox::connRowKind(uint8_t visualIdx) const {
             if (i == 0) return MBConnRow::MIN_BULB;
             if (i == 1) return MBConnRow::MAX_BULB;
             if (i == 2) return MBConnRow::REARM;
-            i -= 3;
+            if (i == 3) return MBConnRow::END_DELAY;
+            i -= 4;
         }
     }
 
@@ -302,22 +355,22 @@ void MultiBox::handleEncoderRotate(int delta) {
 }
 
 void MultiBox::handleConnectionRotate(int delta) {
+    // Both sub-lists carry a trailing BACK row, so their range is n+1 and an
+    // empty list is still navigable (BACK is the only entry).
     if (editMode.state == MultiBoxEditMode::SCANNING) {
-        uint8_t n = nodeManager.scanResultCount();
-        if (n == 0) return;
+        int count = (int)nodeManager.scanResultCount() + 1;
         int v = (int)editMode.scanSel + (delta > 0 ? 1 : -1);
-        if (v < 0) v = n - 1;
-        if (v >= (int)n) v = 0;
+        if (v < 0) v = count - 1;
+        if (v >= count) v = 0;
         editMode.scanSel = (uint8_t)v;
         return;
     }
 
     if (editMode.state == MultiBoxEditMode::PEER_LIST) {
-        uint8_t n = nodeManager.peerCount();
-        if (n == 0) return;
+        int count = (int)nodeManager.peerCount() + 1;
         int v = (int)editMode.peerSel + (delta > 0 ? 1 : -1);
-        if (v < 0) v = n - 1;
-        if (v >= (int)n) v = 0;
+        if (v < 0) v = count - 1;
+        if (v >= count) v = 0;
         editMode.peerSel = (uint8_t)v;
         return;
     }
@@ -343,6 +396,18 @@ void MultiBox::handleConnectionRotate(int delta) {
             if (v < 5) v = 5;
             if (v > 500) v = 500;
             config.detectThresholdCm = (uint16_t)v;
+        } else if (row == MBConnRow::RANGE_MIN) {
+            int v = (int)config.rangeMinCm + delta * 10;
+            if (v < 0) v = 0;
+            // Clamp against the far edge rather than swapping, same rule Auto
+            // Shoot's range editing follows.
+            if (v > (int)config.rangeMaxCm - 10) v = config.rangeMaxCm - 10;
+            config.rangeMinCm = (uint16_t)v;
+        } else if (row == MBConnRow::RANGE_MAX) {
+            int v = (int)config.rangeMaxCm + delta * 10;
+            if (v < (int)config.rangeMinCm + 10) v = config.rangeMinCm + 10;
+            if (v > 3000) v = 3000;
+            config.rangeMaxCm = (uint16_t)v;
         } else if (row == MBConnRow::FLASH_DELAY) {
             int v = (int)config.flashDelayMs + delta * 50;
             if (v < 0) v = 0;
@@ -361,6 +426,11 @@ void MultiBox::handleConnectionRotate(int delta) {
             if (v <= (int)config.minBulbSec) v = config.minBulbSec + 1;
             if (v > 900) v = 900;
             config.maxBulbSec = (uint16_t)v;
+        } else if (row == MBConnRow::END_DELAY) {
+            int v = (int)config.endDelayMs + delta * 100;
+            if (v < 0) v = 0;
+            if (v > 10000) v = 10000;
+            config.endDelayMs = (uint16_t)v;
         } else if (row == MBConnRow::REARM) {
             // Coarser steps once it is already seconds long, so the useful
             // overload-guard range (up to a minute) is reachable by hand.
@@ -398,7 +468,9 @@ void MultiBox::handleConnectionPress() {
     }
 
     if (editMode.state == MultiBoxEditMode::SCANNING) {
-        if (!nodeManager.scanInProgress()) {
+        uint8_t n = nodeManager.scanResultCount();
+        bool onBack = (editMode.scanSel >= n);   // trailing BACK row
+        if (!onBack && !nodeManager.scanInProgress()) {
             NodeManager::Candidate* c = nodeManager.scanResultAt(editMode.scanSel);
             if (c) {
                 nodeManager.addOrUpdatePeer(c->nodeId, c->role, c->mac);
@@ -438,6 +510,12 @@ void MultiBox::handleConnectionPress() {
     }
 
     if (editMode.state == MultiBoxEditMode::PEER_LIST) {
+        // Trailing BACK row FIRST: it changes nothing, so it must not be
+        // routed through the "this will disturb the run" confirmation below.
+        if (editMode.peerSel >= nodeManager.peerCount()) {
+            editMode.state = MultiBoxEditMode::SELECTING;
+            return;
+        }
         // Dropping a peer mid-run can strand a session -- confirm first.
         if (isBusy()) {
             editMode.pending = MultiBoxEditMode::PEND_REMOVE_PEER;
@@ -474,11 +552,17 @@ void MultiBox::handleConnectionPress() {
             editMode.state = MultiBoxEditMode::EDITING;
             break;
         case MBConnRow::DETECT:
+        case MBConnRow::RANGE_MIN:
+        case MBConnRow::RANGE_MAX:
         case MBConnRow::FLASH_DELAY:
         case MBConnRow::MIN_BULB:
         case MBConnRow::MAX_BULB:
         case MBConnRow::REARM:
+        case MBConnRow::END_DELAY:
             editMode.state = MultiBoxEditMode::EDITING;
+            break;
+        case MBConnRow::RANGE_ON:
+            config.rangeFilterEnabled = !config.rangeFilterEnabled;
             break;
         case MBConnRow::PAIR:
             nodeManager.startScan();

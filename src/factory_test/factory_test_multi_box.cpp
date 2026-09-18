@@ -37,16 +37,19 @@ void FactoryTest::_multi_box_loop() {
     // regardless of input/display-power-save state.
     multiBox.update();
 
+    // Low-battery guard -- warns, and on a flat pack asks this mode to exit so
+    // its own clean-exit path runs before power is cut. Must sit OUTSIDE the
+    // branch below: it was originally inserted inside the EXPOSING arm, which
+    // meant the guard only ever ran while the shutter was open and a flat
+    // battery went unnoticed in every other state.
+    _battery_guard_tick();
+
     // Never dim/screen-off mid-exposure — a person needs to see the status.
     // Mirrors how _display_power_save_tick() itself already special-cases
     // the scheduler countdown popup (force-awake, skip its own tick/wake).
     if (multiBox.state.session == MultiBoxState::EXPOSING) {
         DisplayPowerSave::keepAwake();
         handleMultiBoxInput();
-    // Low-battery guard -- warns, and on a flat pack asks this mode to exit
-    // so its own clean-exit path runs before power is cut.
-    _battery_guard_tick();
-
     } else if (!_display_power_save_tick()) {
         handleMultiBoxInput();
     }

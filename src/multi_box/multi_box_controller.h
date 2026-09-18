@@ -33,6 +33,15 @@ public:
     // cannot cut the frame short.
     void requestEnd();
 
+    // Open a session as if a START node had asked for one. Exists for the
+    // single-box development mode: without a second box there is no way to
+    // exercise MAIN's half of the cycle -- bulb open, MAIN's own TF-Luna
+    // closing it, minBulbSec/maxBulbSec, rearm -- which is precisely the half
+    // most likely to be wrong. Deliberately calls the SAME code the packet
+    // path does rather than reimplementing it; a simulator that duplicated the
+    // logic would prove nothing about the real one.
+    void simulateStart();
+
     void requestExit();   // safe-disarm sequence for the UI's exit-confirm "OK"
 
     // public: a role change mid-exposure has to be able to close the shutter
