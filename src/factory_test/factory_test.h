@@ -195,6 +195,11 @@ public:
      * flow. Was the old standalone DISPLAY mode's launcher slot; that
      * mode's settings (brightness/power save/theme/rotation) live in
      * SETTING's Display rows now (see setting.cpp), unrelated to this. */
+    void _dev_mode_test();
+    void _dev_mode_loop();
+    void handleDevModeInput();
+    int _dev_mode_enc_last_pos = 0;
+
     void _multi_box_test();
     void _multi_box_loop();
     void handleMultiBoxInput();

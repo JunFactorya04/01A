@@ -29,7 +29,7 @@ struct AppOptionRenderProps_t
     const char* tag;
     const std::uint16_t* icon;
 };
-constexpr int _app_render_props_list_size = 8;
+constexpr int _app_render_props_list_size = 9;
 constexpr AppOptionRenderProps_t _app_render_props_list[] = {
     {0xB8DBD9, 0x385B59, "AUTO SHOOT", image_data_icon_display},
     {0x87C38F, 0x07430F, "MULTI BOX", image_data_icon_brightness},
@@ -40,6 +40,7 @@ constexpr AppOptionRenderProps_t _app_render_props_list[] = {
     {0xF5C396, 0x754316, "SETTING", image_data_icon_menu},
     {0xC6D5EF, 0x46556F, "SLEEP&WAKEUP", image_data_icon_sleep},
     {0xCEDBB8, 0x4E5B38, "POWER OFF", image_data_icon_poweroff},
+    {0xD8C8E8, 0x584868, "FOR DEVELOP", image_data_icon_encoder},
 };
 
 static Transition2D* _batv_panel_transition = nullptr;
@@ -258,6 +259,8 @@ class LauncherMenu : public SmoothOptions
             _ft->_sleep_week_test();  // Sleep & Week
         else if (matching_index == 7)
             _ft->_power_off();
+        else if (matching_index == 8)
+            _ft->_dev_mode_test();
     }
 };
 
