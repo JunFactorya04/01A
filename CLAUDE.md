@@ -658,8 +658,86 @@ when the next exposure opens would otherwise end it instantly), and `rearmMs` �
 **Rest**, range widened to 60s and shown on MAIN's main screen — is a floor on the gap between
 shots, which directly caps the shot rate however many people cross.
 
-**Not hardware-verified.** All of the above compiles and the UI was checked on one box, but the
-ESP-NOW cycle needs at least two boxes to exercise. Treat the whole flow as untested.
+**Six real faults were found here by the FOR DEVELOP bench harness (see below), all of them
+invisible from reading the code or from a successful build.** Recorded because each is the kind of
+thing that would otherwise be rediscovered the hard way:
+
+1. **TF-Luna was never initialised when the role was MAIN** -- an exclusion left over from when
+   CENTER was a passive coordinator that never read the sensor. MAIN would open the shutter
+   normally and then never see anyone cross; every frame would end on the max-bulb cap, which in
+   the field reads as a dead sensor, not as a missing `begin()`. A role assigned at runtime now
+   brings the sensor up too, not just one present at mode entry.
+2. **`MultiBox::update()` returned early when `role == NONE`**, and that early return also gated
+   `multiBoxController.update()` -- which is what drains the ESP-NOW receive queue. An unassigned
+   box processed no `HELLO_ACK` at all, so its scan could never find anything, never finish
+   (`nodeManager.tick()` closes the window) and never auto-claim MAIN. **Pairing a fresh box was
+   impossible**, which is the first thing anyone does. Networking and discovery now run regardless
+   of role; only the sensor/session work is gated.
+3. **The scan and peer sub-lists rendered only the first four rows** while selection ran to
+   `MB_MAX_PEERS`, so entries past the fourth were selectable but invisible and could be removed
+   unseen.
+4. **`_battery_guard_tick()` sat inside the `EXPOSING` branch**, so the low-battery guard ran only
+   while the shutter was open. (The five other modes were correct; Multi Box's `} else if` shape is
+   what the original insertion landed inside.)
+5. **`forceCloseBulbIfExposing()` left `session == EXPOSING`** after physically closing the
+   shutter, so everything reading that state stayed wrong -- the UI kept counting the bulb timer up
+   after STOP.
+6. **`minBulbSec` deferred a latched close rather than ignoring the sensor.** A stray reading in
+   the first second of a 9s minimum ended the frame at exactly 9s instead of waiting for a real
+   crossing, and the display jumped to its "detected" phase and froze there. It is now a true
+   **ignore window**: inside it `requestEnd()` returns without latching anything. Measured on
+   hardware, detection resumes on the first tick after the window -- 26ms from crossing to close.
+
+**End Delay** (`config.endDelayMs`, 0-10s in 100ms steps) holds the close after the finish line is
+crossed: the sensor fires as the subject ENTERS the beam, but a runner still has to clear the
+frame. Stored as a deadline (`state.endDueAtMs`) and checked each tick, never slept on.
+
+**Range Filter** (`rangeFilterEnabled`/`rangeMinCm`/`rangeMaxCm`) is a **pre-filter**, unlike Auto
+Shoot's version which is the detection rule itself. Detection here is deviation-from-baseline, so a
+reading outside the band is treated as no reading at all and is not fed to the baseline either --
+otherwise distant background would drag the reference even without tripping the threshold. Every
+read goes through `MultiBox::sensorValid()` so the filter cannot be applied in one place and
+forgotten in another. Off by default; the plain baseline model is what has been tested. The config
+existed from the start but **had no UI at all** until now -- the same class of bug as the four
+shooting parameters above.
+
+**Still not verified with two boxes.** The single-box harness exercises MAIN's whole half of the
+cycle, but the ESP-NOW handshake between boxes -- pairing, heartbeat, role propagation, START/
+SHOT_DONE, the conflict banners -- has never run against a second box.
+
+### FOR DEVELOP: single-box bench harness for MULTI BOX
+
+`src/dev_mode/` plus `factory_test_dev_mode.cpp`, on the launcher's ninth card. It replaces
+**exactly one thing** -- the ESP-NOW START packet -- with an interval timer, through
+`MultiBoxController::simulateStart()`. Everything downstream is the real Multi Box code.
+
+That is the entire point, and it is worth defending: a harness that reimplemented the logic would
+prove nothing about the real one. Because this drives the real path, a bug found on the bench *is*
+a Multi Box bug -- which is how the six above were found in a single session.
+
+It borrows the MAIN role on entry and restores the box's real role on exit. **The override must
+reach `NodeManager`, not just `MultiBoxConfig`**: `MultiBoxController::update()` gates the
+bulb-closing path on `nodeManager.selfRole()`, and an earlier attempt at keeping the override
+RAM-only left `centerCloseBulbIfDue()` never running -- shutter open past `maxBulbSec`, session
+stuck on EXPOSING, interval never counting again. `setSelfRole()` alone does not persist (only
+`saveAll()` does), and `teardown()` rewrites NVS with the real role, so a bench session cannot
+leave a box reconfigured. Settings edited here are saved with `MultiBox::saveParams()` rather than
+`saveConfig()`, for the same reason.
+
+Its **Interval counts from the END of a cycle**, matching Timelapse's rule. Start-to-start meant a
+long exposure had already consumed the interval by the time the shutter closed, so every cycle
+after the first fired instantly. Real gap between frames is therefore `Rest + Interval`, since Rest
+is Multi Box's own overload guard and a separate thing.
+
+**Measured on hardware**, stable across cycles: `openBulb` 78-98ms, `closeBulb` 456-497ms (Sony's
+seven-write closing sequence), crossing to close decision 26ms, max-bulb cap accurate to ~6ms.
+**Known tradeoff, deliberately not acted on**: `openBulb()` drives G1/G2 before BLE and
+`closeBulb()` drops G1/G2 before BLE, so a wired camera and a BLE camera receive exposures
+differing by ~550ms. Fixing that means firing BLE first, which contradicts the existing "GPIO first
+so BLE latency never affects pulse timing" rule -- a real tradeoff, not an oversight.
+
+Added as a ninth card rather than replacing POWER OFF: **that card is the only user-facing way to
+switch the device off**, since the launcher's power button only selects a card.
 
 **Anti-replay/staleness**: the ESP-NOW receive callback (`espNowRecvCallback` in
 `multi_box_controller.cpp`) only validates packet size and pushes to a FreeRTOS queue — it never
